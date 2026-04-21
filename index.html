@@ -5,6 +5,44 @@
     <title>AI 수학 미로 탈출 - 백룸 심연 모드</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+        import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+
+        // ⚠️ 주의: 이 부분은 본인의 Firebase 웹 설정값으로 바꿔야 합니다! (하단 설명 참고)
+        const firebaseConfig = {
+  apiKey: "AIzaSyA7kuCSB9UsaCtOYIhsQGuil0-g5rIh_Fs",
+  authDomain: "bloodborne-b1aae.firebaseapp.com",
+  databaseURL: "https://bloodborne-b1aae-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "bloodborne-b1aae",
+  storageBucket: "bloodborne-b1aae.firebasestorage.app",
+  messagingSenderId: "415284045901",
+  appId: "1:415284045901:web:ec45dcb66a955811c45404",
+  measurementId: "G-N1MV59ZVQV"
+};
+
+
+        // Firebase 초기화
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // script.js에서 쓸 수 있도록 전역 함수로 만들기
+        window.saveGameStats = async function(stats) {
+            try {
+                await addDoc(collection(db, "game_clears"), {
+                    clearTime: stats.clearTime,
+                    totalAttempted: stats.totalAttempted,
+                    correctAnswers: stats.correctAnswers,
+                    wrongQuestions: stats.wrongQuestions,
+                    timestamp: new Date()
+                });
+                console.log("✅ Firebase 통계 저장 완료!");
+            } catch (e) {
+                console.error("❌ Firebase 저장 실패:", e);
+            }
+        };
+    </script>
 </head>
 <body>
     <div id="math-panel" class="hidden"> 
