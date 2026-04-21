@@ -1,5 +1,5 @@
-// 서버 도메인 설정
-const BACKEND_URL = "http://localhost:5000";
+// 🚨 주의: 클라이언트에 API 키가 노출됩니다!
+const GROQ_API_KEY = "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";
 
 const canvas3D = document.getElementById("gameCanvas");
 const renderer = new THREE.WebGLRenderer({ canvas: canvas3D, antialias: true });
@@ -12,12 +12,10 @@ const mCtx = mCanvas.getContext("2d");
 const bgColor = 0x0a0a0a;
 scene.background = new THREE.Color(bgColor); 
 scene.fog = new THREE.Fog(bgColor, 1, 5.5);
-
 const camera = new THREE.PerspectiveCamera(75, 800/500, 0.1, 100);
 
 const COLS = 32, ROWS = 20;
 let maze = [], visited = [];
-
 const PLAYER_SPEED = 0.06;
 const CHASER_SPEED = PLAYER_SPEED * 1.2;
 
@@ -38,18 +36,6 @@ let gameStartTime = 0;
 let quizStats = { totalAttempted: 0, correctAnswers: 0, wrongQuestions: [] };
 
 let wallMeshes = [], chaserMesh, exitMesh, chaserTexture;
-
-// 기록 저장 (서버로 전송)
-window.saveGameStats = async function(stats) {
-    try {
-        const response = await fetch(`${BACKEND_URL}/save_stats`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(stats)
-        });
-        const result = await response.json();
-        if(result.status === "success") console.log("✅ 기록 완료!");
-    } catch (e) { console.error("❌ 통계 서버 통신 실패", e); }
-};
 
 function generateMaze(width, height) {
     let newMaze = Array(height).fill().map(() => Array(width).fill(1));
@@ -85,7 +71,6 @@ function build3DWorld() {
 
     const wallGeo = new THREE.BoxGeometry(1, 1, 1);
     const wallMat = new THREE.MeshLambertMaterial({ color: 0x6A5832 }); 
-
     for(let r=0; r<ROWS; r++) {
         for(let c=0; c<COLS; c++) {
             if(maze[r][c] === 1) {
@@ -136,8 +121,7 @@ function spawnChaserRandomly() {
         let distToPlayer = Math.hypot(rx - player.x, ry - player.y);
         if (distToPlayer >= 5) valid = true;
     }
-    chaser.x = rx;
-    chaser.y = ry;
+    chaser.x = rx; chaser.y = ry;
     isChaserActive = true;
     if(chaserMesh) chaserMesh.visible = true;
 }
@@ -150,24 +134,33 @@ function getTargetLanguage() {
     return "Japanese (일본어)";
 }
 
-// 🌟 파이썬 서버로 문제 생성 요청! (더 이상 여기서 Groq API 직접 안 부름)
+// 🌟 JS에서 직접 Groq API 호출!
 async function fetchMathProblem() {
     if (gameState !== GameState.QUIZ) return;
     document.getElementById("math-panel").classList.remove("hidden");
-    document.getElementById("question-text").innerText = "🚨 추격자에게 잡혔다... 서버에서 문제 생성 중...";
+    document.getElementById("question-text").innerText = "🚨 추격자에게 잡혔다... 문제 생성 중...";
     document.getElementById("options-text").innerHTML = "";
 
     const targetLang = getTargetLanguage();
+    const prompt = `너는 수능 수학 출제 위원이야. 미적분/기하/확통 중 하나를 골라 수능 28번 난이도의 객관식 문제를 1개 만들어. 모든 지문과 보기는 반드시 ${targetLang}로 작성해. 무조건 아래 JSON 형식만 반환해: { "question": "문제", "options": ["1번", "2번", "3번", "4번", "5번"], "answer": "정답번호(1~5)" }`;
 
     try {
-        const response = await fetch(`${BACKEND_URL}/generate_quiz`, {
+        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ targetLang: targetLang })
+            headers: {
+                "Authorization": `Bearer ${GROQ_API_KEY}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                model: "llama-3.3-70b-versatile",
+                messages: [{ role: "user", content: prompt }],
+                response_format: { type: "json_object" },
+                temperature: 0.2
+            })
         });
-        const data = await response.json();
         
-        if(data.status === "error") throw new Error(data.message);
+        const data = await response.json();
+        if(data.error) throw new Error(data.error.message);
 
         const quiz = JSON.parse(data.choices[0].message.content);
         currentQuestionStr = quiz.question; 
@@ -177,7 +170,7 @@ async function fetchMathProblem() {
         timeLeft = MAX_TIME;
     } catch (e) {
         console.error("AI 호출 실패", e);
-        document.getElementById("question-text").innerText = "❌ 문제 생성 실패. 파이썬 서버가 켜져 있는지 확인하세요!";
+        document.getElementById("question-text").innerText = "❌ 문제 생성 실패. 새로고침 해주세요.";
     }
 }
 
@@ -210,21 +203,17 @@ window.addEventListener("keydown", (e) => {
         quizStats.totalAttempted++; 
         if (e.key === currentAnswer) {
             quizStats.correctAnswers++; 
-            document.getElementById("question-text").innerText = "✅ 정답! 추격자가 사라집니다. (3초 뒤 재생성)";
-            
+            document.getElementById("question-text").innerText = "✅ 정답! 추격자가 일시 후퇴합니다.";
             isChaserActive = false;
             if(chaserMesh) chaserMesh.visible = false;
-
             setTimeout(() => {
                 document.getElementById("math-panel").classList.add("hidden");
                 gameState = GameState.PLAYING;
-                setTimeout(() => {
-                    if(gameState === GameState.PLAYING) spawnChaserRandomly();
-                }, 3000);
+                setTimeout(() => { if(gameState === GameState.PLAYING) spawnChaserRandomly(); }, 3000);
             }, 1500);
         } else {
             quizStats.wrongQuestions.push({ question: currentQuestionStr, myAnswer: e.key, realAnswer: currentAnswer });
-            document.getElementById("question-text").innerText = "❌ 오답! (" + currentAnswer + "번이 정답)";
+            document.getElementById("question-text").innerText = `❌ 오답! (정답: ${currentAnswer}번)`;
             setTimeout(() => { alert("❌ 오답! 심연에 잡아먹혔습니다."); resetGame(); }, 2000);
         }
     }
@@ -245,7 +234,6 @@ function movePlayer() {
     let pad = 0.2; 
     let checkX = Math.floor(player.x + dx + Math.sign(dx) * pad);
     if (maze[Math.floor(player.y)] && maze[Math.floor(player.y)][checkX] === 0) player.x += dx;
-    
     let checkY = Math.floor(player.y + dz + Math.sign(dz) * pad);
     if (maze[checkY] && maze[checkY][Math.floor(player.x)] === 0) player.y += dz;
 
@@ -260,20 +248,12 @@ function movePlayer() {
 
 function moveChaser() {
     if (!isChaserActive) return;
-
-    let dx = player.x - chaser.x;
-    let dy = player.y - chaser.y;
+    let dx = player.x - chaser.x, dy = player.y - chaser.y;
     let dist = Math.sqrt(dx*dx + dy*dy);
-    
-    if (dist > 0.05) {
-        chaser.x += (dx / dist) * CHASER_SPEED;
-        chaser.y += (dy / dist) * CHASER_SPEED;
-    }
-
+    if (dist > 0.05) { chaser.x += (dx / dist) * CHASER_SPEED; chaser.y += (dy / dist) * CHASER_SPEED; }
     if (chaserMesh) {
         chaserMesh.position.set(chaser.x, 0, chaser.y);
-        chaserMesh.rotation.x += 0.02;
-        chaserMesh.rotation.y += 0.03;
+        chaserMesh.rotation.x += 0.02; chaserMesh.rotation.y += 0.03;
     }
 }
 
@@ -288,7 +268,6 @@ function drawMinimap() {
             }
         }
     }
-    
     mCtx.fillStyle = "#228822"; mCtx.fillRect(exit.x * mStepX, exit.y * mStepY, mStepX, mStepY); 
     mCtx.fillStyle = "#fff"; 
     mCtx.beginPath(); mCtx.arc(player.x * mStepX, player.y * mStepY, 3, 0, Math.PI * 2); mCtx.fill();
@@ -296,7 +275,6 @@ function drawMinimap() {
     mCtx.beginPath(); mCtx.moveTo(player.x * mStepX, player.y * mStepY);
     mCtx.lineTo((player.x - Math.sin(yaw) * 2) * mStepX, (player.y - Math.cos(yaw) * 2) * mStepY);
     mCtx.stroke();
-
     if (isChaserActive) {
         mCtx.fillStyle = "#aa0000";
         mCtx.beginPath(); mCtx.arc(chaser.x * mStepX, chaser.y * mStepY, 3, 0, Math.PI * 2); mCtx.fill();
@@ -305,70 +283,50 @@ function drawMinimap() {
 
 function update() {
     if (gameState === GameState.PLAYING) {
-        movePlayer();
-        moveChaser();
-
-        if (isChaserActive) {
-            let distToChaser = Math.hypot(player.x - chaser.x, player.y - chaser.y);
-            if (distToChaser < 0.6) {
-                document.exitPointerLock(); 
-                gameState = GameState.QUIZ;
-                fetchMathProblem();
-            }
+        movePlayer(); moveChaser();
+        if (isChaserActive && Math.hypot(player.x - chaser.x, player.y - chaser.y) < 0.6) {
+            document.exitPointerLock(); 
+            gameState = GameState.QUIZ; fetchMathProblem();
         }
-
-        let distToExit = Math.hypot(player.x - (exit.x + 0.5), player.y - (exit.y + 0.5));
-        if (distToExit < 0.8) {
-            let clearTimeSeconds = ((Date.now() - gameStartTime) / 1000).toFixed(2);
+        if (Math.hypot(player.x - (exit.x + 0.5), player.y - (exit.y + 0.5)) < 0.8) {
+            let clearTimeSeconds = parseFloat(((Date.now() - gameStartTime) / 1000).toFixed(2));
             document.exitPointerLock();
-            alert(`🎉 심연 탈출 성공!\n⏱️ 시간: ${clearTimeSeconds}초\n✅ 맞춘 문제: ${quizStats.correctAnswers}개\n❌ 틀린 문제: ${quizStats.wrongQuestions.length}개`);
-            if (window.saveGameStats) window.saveGameStats({ clearTime: parseFloat(clearTimeSeconds), totalAttempted: quizStats.totalAttempted, correctAnswers: quizStats.correctAnswers, wrongQuestions: quizStats.wrongQuestions });
+            alert(`🎉 탈출 성공!\n⏱️ 시간: ${clearTimeSeconds}초\n✅ 정답: ${quizStats.correctAnswers}개`);
+            if (window.saveGameStats) {
+                window.saveGameStats({ clearTime: clearTimeSeconds, ...quizStats });
+            }
             resetGame();
         }
     } else if (gameState === GameState.QUIZ) {
         timeLeft -= 16.6; 
-        if (timeLeft <= 0) { alert("시간 초과! 심연에 잡아먹혔습니다."); resetGame(); }
+        if (timeLeft <= 0) { alert("시간 초과!"); resetGame(); }
         document.getElementById("timer-fill").style.width = (timeLeft / MAX_TIME * 100) + "%";
     }
 }
 
 function resetGame() {
-    maze = generateMaze(COLS, ROWS);
-    player = { x: 1.5, y: 1.5 };
-    pitch = 0; yaw = 0; 
-    camera.rotation.set(0, 0, 0);
-    
+    maze = generateMaze(COLS, ROWS); player = { x: 1.5, y: 1.5 };
+    pitch = 0; yaw = 0; camera.rotation.set(0, 0, 0);
     chaser = { x: exit.x + 0.5, y: exit.y + 0.5 }; 
-    isChaserActive = true;
-    if(chaserMesh) chaserMesh.visible = true;
-
-    visited[1][1] = true;
-    
-    gameState = GameState.PLAYING;
+    isChaserActive = true; if(chaserMesh) chaserMesh.visible = true;
+    visited[1][1] = true; gameState = GameState.PLAYING;
     document.getElementById("math-panel").classList.add("hidden");
     gameStartTime = Date.now();
     quizStats = { totalAttempted: 0, correctAnswers: 0, wrongQuestions: [] };
-    
     build3DWorld();
 }
 
 function loop() {
-    update();
-    renderer.render(scene, camera); 
-    drawMinimap(); 
+    update(); renderer.render(scene, camera); drawMinimap(); 
     requestAnimationFrame(loop);
 }
 
 const rawImage = new Image();
-// 💡 올바른 파일명(image_0.png)으로 수정!
 rawImage.src = 'image_0.png'; 
 rawImage.onload = function() {
     chaserTexture = new THREE.CanvasTexture(rawImage);
-    resetGame();
-    loop();
+    resetGame(); loop();
 };
 rawImage.onerror = function() {
-    console.warn("⚠️ 이미지를 찾을 수 없어 텍스처 없이 시작합니다.");
-    resetGame();
-    loop();
+    resetGame(); loop();
 };
