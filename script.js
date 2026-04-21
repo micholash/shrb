@@ -43,9 +43,21 @@ document.getElementById("startGameBtn").addEventListener("click", () => {
 });
 
 // 💡 수정: 로그인 패널이 켜져있을 땐 화면 클릭(PointerLock) 막기
-canvas3D.addEventListener("click", () => {
-    if (document.getElementById("login-panel").style.display !== "none") return; // 이 줄 추가
-    if (gameState === GameState.READY || gameState === GameState.PLAYING) canvas3D.requestPointerLock();
+window.addEventListener("DOMContentLoaded", () => {
+    const startBtn = document.getElementById("startGameBtn");
+    
+    if (startBtn) {
+        startBtn.addEventListener("click", () => {
+            const idVal = document.getElementById("playerIdInput").value.trim();
+            if (idVal) currentUserId = idVal;
+            
+            // 입력창 숨기고 게임화면 활성화
+            document.getElementById("login-panel").style.display = "none";
+            console.log(`✅ [${currentUserId}] 유저로 입장합니다.`);
+        });
+    } else {
+        console.error("❌ 에러: startGameBtn 버튼을 HTML에서 찾을 수 없습니다.");
+    }
 });
 let currentQuestionStr = "", currentAnswer = "";
 let timeLeft = 60000; const MAX_TIME = 60000;
