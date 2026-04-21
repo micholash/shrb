@@ -5,29 +5,20 @@
     <title>AI 수학 미로 탈출 - 백룸 심연 모드</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    
-    <script>
-    // 🚀 서버 도메인 설정 (현재는 로컬, 나중에 배포하면 주소 변경!)
-    const BACKEND_URL = "http://localhost:5000";
-
-    // 🌟 수정된 기록 저장 함수
-    window.saveGameStats = async function(stats) {
-        try {
-            const response = await fetch(`${BACKEND_URL}/save_stats`, {
-                method: "POST", 
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(stats)
-            });
-            const result = await response.json();
-            if(result.status === "success") console.log("✅ 기록 완료!");
-        } catch (e) { 
-            console.error("❌ 서버 통신 실패", e); 
-        }
-    };
-    </script>
 </head>
 <body>
-    
+    <div id="math-panel" class="hidden"> 
+        <div id="question-text" class="question">문제를 불러오는 중...</div>
+        <div id="options-text" class="options"></div>
+        <div class="timer-bar"><div id="timer-fill"></div></div>
+    </div>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="800" height="500"></canvas>
+        <canvas id="minimap" width="150" height="150"></canvas>
+        <div id="instruction">화면을 클릭하여 심연으로 진입하세요<br>(마우스 고정 해제: ESC)</div>
+    </div>
+
     <script src="script.js"></script>
 </body>
 </html>
