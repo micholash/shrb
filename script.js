@@ -140,9 +140,12 @@ async function fetchMathProblem() {
     } catch (e) { document.getElementById("question-text").innerText = "오류 발생. 새로고침 하세요."; }
 }
 
-// 이벤트 핸들러
-canvas3D.addEventListener("click", () => {
-    if (gameState === GameState.READY || gameState === GameState.PLAYING) canvas3D.requestPointerLock();
+// 이벤트 핸들러 (기존 코드 덮어쓰기)
+document.addEventListener("click", () => {
+    // 화면 전체(document) 어디를 클릭해도 마우스 고정 활성화
+    if (gameState === GameState.READY || gameState === GameState.PLAYING) {
+        canvas3D.requestPointerLock();
+    }
 });
 
 document.addEventListener("pointerlockchange", () => {
@@ -197,17 +200,20 @@ window.addEventListener("keyup", (e) => {
     const key = e.key.toLowerCase(); if (keys.hasOwnProperty(key)) keys[key] = false;
 });
 
+// 기존 update() 함수 전체를 이걸로 덮어쓰세요!
 function update() {
-    let dx = 0, dz = 0;
+    // 💡 게임 진행 중(PLAYING)일 때만 위치 계산 및 이동을 하도록 통째로 감싸줍니다.
+    if (gameState === GameState.PLAYING) {
+        let dx = 0, dz = 0;
         if (keys.w || keys.arrowup) { dx -= Math.sin(yaw) * PLAYER_SPEED; dz -= Math.cos(yaw) * PLAYER_SPEED; }
         if (keys.s || keys.arrowdown) { dx += Math.sin(yaw) * PLAYER_SPEED; dz += Math.cos(yaw) * PLAYER_SPEED; }
         if (keys.a || keys.arrowleft) { dx -= Math.cos(yaw) * PLAYER_SPEED; dz += Math.sin(yaw) * PLAYER_SPEED; }
         if (keys.d || keys.arrowright) { dx += Math.cos(yaw) * PLAYER_SPEED; dz -= Math.sin(yaw) * PLAYER_SPEED; }
 
-        // 💡 수정: 벽 파고들기(시야 뚫림) 방지를 위한 충돌 여백(margin) 설정
+        // 벽 파고들기 방지 & 맵 바깥(undefined) 접근 에러 방지
         let margin = 0.2; 
-        if (maze[Math.floor(player.y)][Math.floor(player.x + dx + Math.sign(dx) * margin)] === 0) player.x += dx;
-        if (maze[Math.floor(player.y + dz + Math.sign(dz) * margin)][Math.floor(player.x)] === 0) player.y += dz;
+        if (maze[Math.floor(player.y)] && maze[Math.floor(player.y)][Math.floor(player.x + dx + Math.sign(dx) * margin)] === 0) player.x += dx;
+        if (maze[Math.floor(player.y + dz + Math.sign(dz) * margin)] && maze[Math.floor(player.y + dz + Math.sign(dz) * margin)][Math.floor(player.x)] === 0) player.y += dz;
         
         visited[Math.floor(player.y)][Math.floor(player.x)] = true;
         camera.position.set(player.x, 0, player.y);
@@ -221,36 +227,27 @@ function update() {
             if (dist < 0.6) { document.exitPointerLock(); gameState = GameState.QUIZ; fetchMathProblem(); }
         }
         
-        // 💡 수정: 추적자 이동 & 굴러가는 애니메이션 적용
+        // 추적자 이동 애니메이션
         if (chaserMesh) {
             chaserMesh.position.set(chaser.x, 0, chaser.y);
-            // x, y 이동량에 맞춰 회전값을 더해줌으로써 데굴데굴 굴러가는 느낌 부여
             let cdx = player.x - chaser.x, cdy = player.y - chaser.y;
             chaserMesh.rotation.x += (cdy * 0.05); 
             chaserMesh.rotation.z -= (cdx * 0.05);
         }
 
-
-
-
-
-
-
-
+        // 탈출구 도달
         if (Math.hypot(player.x - (exit.x + 0.5), player.y - (exit.y + 0.5)) < 0.8) {
             let time = ((Date.now() - gameStartTime) / 1000).toFixed(2);
             alert(`🎉 탈출 성공! 시간: ${time}초`);
-            window.saveGameStats({ clearTime: time, ...quizStats });
-
-
-
-
+            if(window.saveGameStats) window.saveGameStats({ clearTime: time, ...quizStats });
             resetGame();
         }
 
     } else if (gameState === GameState.QUIZ) {
-        timeLeft -= 16.6; if (timeLeft <= 0) { alert("시간 초과!"); resetGame(); }
-        document.getElementById("timer-fill").style.width = (timeLeft / MAX_TIME * 100) + "%";
+        timeLeft -= 16.6; 
+        if (timeLeft <= 0) { alert("시간 초과!"); resetGame(); }
+        const timerFill = document.getElementById("timer-fill");
+        if(timerFill) timerFill.style.width = (timeLeft / MAX_TIME * 100) + "%";
     }
 }
 
