@@ -1,4 +1,3 @@
-// 🚨 주의: 클라이언트에 API 키가 노출됩니다!
 const GROQ_API_KEY = "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";
 
 const canvas3D = document.getElementById("gameCanvas");
@@ -22,13 +21,16 @@ const CHASER_SPEED = PLAYER_SPEED * 1.2;
 let player = { x: 1.5, y: 1.5 }; 
 let exit = { x: COLS - 2.5, y: ROWS - 2.5 };
 let chaser = { x: 0, y: 0 }; 
-let isChaserActive = true; 
 
 let pitch = 0, yaw = 0; 
 const keys = { w: false, a: false, s: false, d: false };
 
-const GameState = { PLAYING: 0, QUIZ: 1, GAMEOVER: 2 };
-let gameState = GameState.PLAYING;
+// 🌟 상태 추가: READY (클릭 대기 상태)
+const GameState = { READY: -1, PLAYING: 0, QUIZ: 1, GAMEOVER: 2 };
+let gameState = GameState.READY; 
+
+let devModeStop = false; // 🌟 개발자 모드 (추적자 정지)
+let isChaserActive = true; 
 
 let currentQuestionStr = "", currentAnswer = "";
 let timeLeft = 60000; const MAX_TIME = 60000;
@@ -134,7 +136,6 @@ function getTargetLanguage() {
     return "Japanese (일본어)";
 }
 
-// 🌟 JS에서 직접 Groq API 호출!
 async function fetchMathProblem() {
     if (gameState !== GameState.QUIZ) return;
     document.getElementById("math-panel").classList.remove("hidden");
@@ -160,8 +161,6 @@ async function fetchMathProblem() {
         });
         
         const data = await response.json();
-        if(data.error) throw new Error(data.error.message);
-
         const quiz = JSON.parse(data.choices[0].message.content);
         currentQuestionStr = quiz.question; 
         document.getElementById("question-text").innerText = `🚨 [${targetLang}] ` + quiz.question;
@@ -169,20 +168,32 @@ async function fetchMathProblem() {
         currentAnswer = quiz.answer.toString();
         timeLeft = MAX_TIME;
     } catch (e) {
-        console.error("AI 호출 실패", e);
         document.getElementById("question-text").innerText = "❌ 문제 생성 실패. 새로고침 해주세요.";
     }
 }
 
+// 🌟 마우스 클릭 시작 제어
 canvas3D.addEventListener("click", () => {
-    if (gameState === GameState.PLAYING) canvas3D.requestPointerLock();
+    if (gameState === GameState.READY || gameState === GameState.PLAYING) {
+        canvas3D.requestPointerLock();
+    }
 });
 
 document.addEventListener("pointerlockchange", () => {
     if (document.pointerLockElement === canvas3D) {
+        // 게임 첫 시작일 때
+        if (gameState === GameState.READY) {
+            gameState = GameState.PLAYING;
+            if (gameStartTime === 0) gameStartTime = Date.now(); // 최초 클릭 시 타이머 시작
+        }
         document.getElementById("instruction").style.display = "none";
     } else {
-        document.getElementById("instruction").style.display = "block";
+        // 게임 중 ESC 눌렀을 때
+        if (gameState === GameState.PLAYING) {
+            gameState = GameState.READY; // 멈춤 상태로 변경
+            document.getElementById("instruction").innerText = "화면을 클릭하여 계속하세요\n(개발자 모드: Ctrl + F)";
+            document.getElementById("instruction").style.display = "block";
+        }
     }
 });
 
@@ -196,6 +207,14 @@ document.addEventListener("mousemove", (e) => {
 });
 
 window.addEventListener("keydown", (e) => {
+    // 🌟 개발자 모드: Ctrl + F 누르면 추격자 정지/재개
+    if (e.ctrlKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        devModeStop = !devModeStop;
+        console.log(devModeStop ? "🛠️ 개발자 모드: 추격자 정지됨" : "🛠️ 개발자 모드: 추격자 이동 재개");
+        return;
+    }
+
     const key = e.key.toLowerCase();
     if (keys.hasOwnProperty(key)) keys[key] = true;
 
@@ -203,14 +222,14 @@ window.addEventListener("keydown", (e) => {
         quizStats.totalAttempted++; 
         if (e.key === currentAnswer) {
             quizStats.correctAnswers++; 
-            document.getElementById("question-text").innerText = "✅ 정답! 추격자가 일시 후퇴합니다.";
-            isChaserActive = false;
-            if(chaserMesh) chaserMesh.visible = false;
-            setTimeout(() => {
-                document.getElementById("math-panel").classList.add("hidden");
-                gameState = GameState.PLAYING;
-                setTimeout(() => { if(gameState === GameState.PLAYING) spawnChaserRandomly(); }, 3000);
-            }, 1500);
+            document.getElementById("math-panel").classList.add("hidden");
+            
+            // 🌟 정답 맞추면 추적자를 다른 곳에 스폰하고 다시 화면 클릭을 기다림
+            spawnChaserRandomly();
+            gameState = GameState.READY;
+            document.getElementById("instruction").innerText = "화면을 클릭하여 심연으로 진입하세요\n(마우스 고정 해제: ESC)";
+            document.getElementById("instruction").style.display = "block";
+            
         } else {
             quizStats.wrongQuestions.push({ question: currentQuestionStr, myAnswer: e.key, realAnswer: currentAnswer });
             document.getElementById("question-text").innerText = `❌ 오답! (정답: ${currentAnswer}번)`;
@@ -247,7 +266,9 @@ function movePlayer() {
 }
 
 function moveChaser() {
-    if (!isChaserActive) return;
+    // 🌟 개발자 모드 켜졌으면 추격자 정지
+    if (!isChaserActive || devModeStop) return;
+    
     let dx = player.x - chaser.x, dy = player.y - chaser.y;
     let dist = Math.sqrt(dx*dx + dy*dy);
     if (dist > 0.05) { chaser.x += (dx / dist) * CHASER_SPEED; chaser.y += (dy / dist) * CHASER_SPEED; }
@@ -276,7 +297,7 @@ function drawMinimap() {
     mCtx.lineTo((player.x - Math.sin(yaw) * 2) * mStepX, (player.y - Math.cos(yaw) * 2) * mStepY);
     mCtx.stroke();
     if (isChaserActive) {
-        mCtx.fillStyle = "#aa0000";
+        mCtx.fillStyle = devModeStop ? "#0000ff" : "#aa0000"; // 개발자 모드 시 미니맵 점 파란색으로 표시
         mCtx.beginPath(); mCtx.arc(chaser.x * mStepX, chaser.y * mStepY, 3, 0, Math.PI * 2); mCtx.fill();
     }
 }
@@ -284,10 +305,15 @@ function drawMinimap() {
 function update() {
     if (gameState === GameState.PLAYING) {
         movePlayer(); moveChaser();
+        
+        // 추격자 충돌
         if (isChaserActive && Math.hypot(player.x - chaser.x, player.y - chaser.y) < 0.6) {
             document.exitPointerLock(); 
-            gameState = GameState.QUIZ; fetchMathProblem();
+            gameState = GameState.QUIZ; 
+            fetchMathProblem();
         }
+        
+        // 출구 탈출
         if (Math.hypot(player.x - (exit.x + 0.5), player.y - (exit.y + 0.5)) < 0.8) {
             let clearTimeSeconds = parseFloat(((Date.now() - gameStartTime) / 1000).toFixed(2));
             document.exitPointerLock();
@@ -308,10 +334,20 @@ function resetGame() {
     maze = generateMaze(COLS, ROWS); player = { x: 1.5, y: 1.5 };
     pitch = 0; yaw = 0; camera.rotation.set(0, 0, 0);
     chaser = { x: exit.x + 0.5, y: exit.y + 0.5 }; 
-    isChaserActive = true; if(chaserMesh) chaserMesh.visible = true;
-    visited[1][1] = true; gameState = GameState.PLAYING;
+    
+    // 🌟 초기 상태 초기화
+    isChaserActive = true; 
+    devModeStop = false; 
+    gameState = GameState.READY; 
+    gameStartTime = 0; 
+    
+    if(chaserMesh) chaserMesh.visible = true;
+    visited[1][1] = true; 
+    
     document.getElementById("math-panel").classList.add("hidden");
-    gameStartTime = Date.now();
+    document.getElementById("instruction").innerText = "화면을 클릭하여 심연으로 진입하세요\n(마우스 고정 해제: ESC)";
+    document.getElementById("instruction").style.display = "block";
+    
     quizStats = { totalAttempted: 0, correctAnswers: 0, wrongQuestions: [] };
     build3DWorld();
 }
