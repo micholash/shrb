@@ -7,38 +7,37 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
-        import { getDatabase, ref, push } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+    import { getDatabase, ref, push } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
 
-        const firebaseConfig = {
-            apiKey: "AIzaSyA7kuCSB9UsaCtOYIhsQGuil0-g5rIh_Fs",
-            authDomain: "bloodborne-b1aae.firebaseapp.com",
-            databaseURL: "https://bloodborne-b1aae-default-rtdb.asia-southeast1.firebasedatabase.app",
-            projectId: "bloodborne-b1aae",
-            storageBucket: "bloodborne-b1aae.firebasestorage.app",
-            messagingSenderId: "415284045901",
-            appId: "1:415284045901:web:ec45dcb66a955811c45404",
-            measurementId: "G-N1MV59ZVQV"
-        };
+    const firebaseConfig = {
+        apiKey: "AIzaSyA7kuCSB9UsaCtOYIhsQGuil0-g5rIh_Fs",
+        authDomain: "bloodborne-b1aae.firebaseapp.com",
+        databaseURL: "https://bloodborne-b1aae-default-rtdb.asia-southeast1.firebasedatabase.app",
+        projectId: "bloodborne-b1aae",
+        storageBucket: "bloodborne-b1aae.firebasestorage.app",
+        messagingSenderId: "415284045901",
+        appId: "1:415284045901:web:ec45dcb66a955811c45404",
+        measurementId: "G-N1MV59ZVQV"
+    };
 
-        const app = initializeApp(firebaseConfig);
-        const db = getDatabase(app); // Realtime Database 초기화
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
 
-        window.saveGameStats = async function(stats) {
-            try {
-                // 'game_clears' 경로에 데이터를 push(추가)합니다.
-                const statsRef = ref(db, 'game_clears');
-                await push(statsRef, {
-                    ...stats,
-                    serverTimestamp: new Date().toISOString()
-                });
-                console.log("✅ 통계가 Realtime Database에 저장되었습니다.");
-            } catch (e) {
-                console.error("❌ 저장 실패:", e);
-                alert("데이터 저장 중 오류가 발생했습니다: " + e.message);
-            }
-        };
-    </script>
+    // 기존 게임 로직(script.js)에서 호출하던 함수 그대로 사용 가능하게 덮어씌움
+    window.saveGameStats = async function(stats) {
+        try {
+            const statsRef = ref(db, 'game_clears');
+            await push(statsRef, {
+                ...stats,
+                serverTimestamp: new Date().toISOString()
+            });
+            console.log("✅ 통계가 Realtime Database에 저장되었습니다.");
+        } catch (e) {
+            console.error("❌ 저장 실패:", e);
+        }
+    };
+</script>
 </head>
 <body>
     <div id="math-panel" class="hidden"> 
