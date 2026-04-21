@@ -32,33 +32,21 @@ let gameState = GameState.READY;
 let devModeStop = false; 
 let isChaserActive = true; 
 
-let currentUserId = "Guest";
 
-document.getElementById("startGameBtn").addEventListener("click", () => {
-    const idVal = document.getElementById("playerIdInput").value.trim();
-    if (idVal) currentUserId = idVal;
-    
-    // 입력창 숨기고 게임화면 활성화
-    document.getElementById("login-panel").style.display = "none";
-});
 
-// 💡 수정: 로그인 패널이 켜져있을 땐 화면 클릭(PointerLock) 막기
-window.addEventListener("DOMContentLoaded", () => {
-    const startBtn = document.getElementById("startGameBtn");
-    
-    if (startBtn) {
-        startBtn.addEventListener("click", () => {
-            const idVal = document.getElementById("playerIdInput").value.trim();
-            if (idVal) currentUserId = idVal;
-            
-            // 입력창 숨기고 게임화면 활성화
-            document.getElementById("login-panel").style.display = "none";
-            console.log(`✅ [${currentUserId}] 유저로 입장합니다.`);
-        });
-    } else {
-        console.error("❌ 에러: startGameBtn 버튼을 HTML에서 찾을 수 없습니다.");
-    }
-});
+
+
+
+
+
+
+
+
+
+
+
+
+
 let currentQuestionStr = "", currentAnswer = "";
 let timeLeft = 60000; const MAX_TIME = 60000;
 let gameStartTime = 0;
@@ -210,8 +198,7 @@ window.addEventListener("keyup", (e) => {
 });
 
 function update() {
-    if (gameState === GameState.PLAYING) {
-        let dx = 0, dz = 0;
+    let dx = 0, dz = 0;
         if (keys.w || keys.arrowup) { dx -= Math.sin(yaw) * PLAYER_SPEED; dz -= Math.cos(yaw) * PLAYER_SPEED; }
         if (keys.s || keys.arrowdown) { dx += Math.sin(yaw) * PLAYER_SPEED; dz += Math.cos(yaw) * PLAYER_SPEED; }
         if (keys.a || keys.arrowleft) { dx -= Math.cos(yaw) * PLAYER_SPEED; dz += Math.sin(yaw) * PLAYER_SPEED; }
@@ -243,17 +230,24 @@ function update() {
             chaserMesh.rotation.z -= (cdx * 0.05);
         }
 
+
+
+
+
+
+
+
         if (Math.hypot(player.x - (exit.x + 0.5), player.y - (exit.y + 0.5)) < 0.8) {
             let time = ((Date.now() - gameStartTime) / 1000).toFixed(2);
             alert(`🎉 탈출 성공! 시간: ${time}초`);
-            
-            // 💡 수정: ID(currentUserId)를 통계 데이터에 합쳐서 전송!
-            if (window.saveGameStats) {
-                window.saveGameStats({ playerId: currentUserId, clearTime: time, ...quizStats });
-            }
+            window.saveGameStats({ clearTime: time, ...quizStats });
+
+
+
+
             resetGame();
         }
-        }
+
     } else if (gameState === GameState.QUIZ) {
         timeLeft -= 16.6; if (timeLeft <= 0) { alert("시간 초과!"); resetGame(); }
         document.getElementById("timer-fill").style.width = (timeLeft / MAX_TIME * 100) + "%";
