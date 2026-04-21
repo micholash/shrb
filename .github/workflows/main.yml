@@ -1,0 +1,42 @@
+name: Upload Stats to Firebase
+
+on:
+  push:
+    branches:
+      - main # main 브랜치에 푸시될 때 실행
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest # Linux 환경에서 실행
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          pip install firebase-admin requests flask-cors datetime
+
+      # 4. Create Temporary Key File
+      - name: Create Temporary Key File
+        run: |
+          echo "${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}" > firebase_key.json
+        # 보안 경고: Secrets 내용은 자동으로 마스킹되지만, echo 명령어 사용 시 주의하세요.
+
+      # 5. Run Python Script
+      - name: Run Python Script
+        run: |
+          python save_stats.py
+        env:
+          FIREBASE_KEY_PATH: firebase_key.json # 환경 변수를 통해 임시 파일 경로 전달
+
+      # 6. Delete Temporary File
+      - name: Delete Temporary File
+        run: |
+          rm firebase_key.json
+        # 보안 경고: 빌드 환경에서 키 파일을 제거하여 유출 방지
