@@ -23,7 +23,8 @@ let exit = { x: COLS - 2.5, y: ROWS - 2.5 };
 let chaser = { x: 0, y: 0 }; 
 
 let pitch = 0, yaw = 0; 
-const keys = { w: false, a: false, s: false, d: false };
+// 기존 코드에서 keys 선언된 부분을 찾아서 이렇게 arrow 속성을 추가하세요.
+const keys = { w: false, a: false, s: false, d: false, arrowup: false, arrowdown: false, arrowleft: false, arrowright: false };
 
 const GameState = { READY: -1, PLAYING: 0, QUIZ: 1, GAMEOVER: 2 };
 let gameState = GameState.READY; 
@@ -184,10 +185,10 @@ window.addEventListener("keyup", (e) => {
 function update() {
     if (gameState === GameState.PLAYING) {
         let dx = 0, dz = 0;
-        if (keys.w) { dx -= Math.sin(yaw) * PLAYER_SPEED; dz -= Math.cos(yaw) * PLAYER_SPEED; }
-        if (keys.s) { dx += Math.sin(yaw) * PLAYER_SPEED; dz += Math.cos(yaw) * PLAYER_SPEED; }
-        if (keys.a) { dx -= Math.cos(yaw) * PLAYER_SPEED; dz += Math.sin(yaw) * PLAYER_SPEED; }
-        if (keys.d) { dx += Math.cos(yaw) * PLAYER_SPEED; dz -= Math.sin(yaw) * PLAYER_SPEED; }
+        if (keys.w || keys.arrowup) { dx -= Math.sin(yaw) * PLAYER_SPEED; dz -= Math.cos(yaw) * PLAYER_SPEED; }
+        if (keys.s || keys.arrowdown) { dx += Math.sin(yaw) * PLAYER_SPEED; dz += Math.cos(yaw) * PLAYER_SPEED; }
+        if (keys.a || keys.arrowleft) { dx -= Math.cos(yaw) * PLAYER_SPEED; dz += Math.sin(yaw) * PLAYER_SPEED; }
+        if (keys.d || keys.arrowright) { dx += Math.cos(yaw) * PLAYER_SPEED; dz -= Math.sin(yaw) * PLAYER_SPEED; }
 
         if (maze[Math.floor(player.y)][Math.floor(player.x + dx)] === 0) player.x += dx;
         if (maze[Math.floor(player.y + dz)][Math.floor(player.x)] === 0) player.y += dz;
