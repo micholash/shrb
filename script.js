@@ -10,7 +10,7 @@ const mCtx = mCanvas.getContext("2d");
 
 const bgColor = 0x0a0a0a;
 scene.background = new THREE.Color(bgColor); 
-scene.fog = new THREE.Fog(bgColor, 1, 5.5);
+scene.fog = new THREE.Fog(bgColor, 1, 15); // 💡 수정: 시야를 훨씬 멀리까지 보이게 늘림
 const camera = new THREE.PerspectiveCamera(75, 800/500, 0.1, 100);
 
 const COLS = 32, ROWS = 20;
@@ -32,6 +32,21 @@ let gameState = GameState.READY;
 let devModeStop = false; 
 let isChaserActive = true; 
 
+let currentUserId = "Guest";
+
+document.getElementById("startGameBtn").addEventListener("click", () => {
+    const idVal = document.getElementById("playerIdInput").value.trim();
+    if (idVal) currentUserId = idVal;
+    
+    // 입력창 숨기고 게임화면 활성화
+    document.getElementById("login-panel").style.display = "none";
+});
+
+// 💡 수정: 로그인 패널이 켜져있을 땐 화면 클릭(PointerLock) 막기
+canvas3D.addEventListener("click", () => {
+    if (document.getElementById("login-panel").style.display !== "none") return; // 이 줄 추가
+    if (gameState === GameState.READY || gameState === GameState.PLAYING) canvas3D.requestPointerLock();
+});
 let currentQuestionStr = "", currentAnswer = "";
 let timeLeft = 60000; const MAX_TIME = 60000;
 let gameStartTime = 0;
@@ -60,7 +75,7 @@ function generateMaze(width, height) {
 function build3DWorld() {
     wallMeshes.forEach(w => scene.remove(w));
     wallMeshes = [];
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.15); 
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7); // 💡 수정: 빛의 강도를 0.15에서 0.7로 대폭 상승
     scene.add(ambientLight);
     const wallGeo = new THREE.BoxGeometry(1, 1, 1);
     const wallMat = new THREE.MeshLambertMaterial({ color: 0x6A5832 }); 
@@ -190,24 +205,42 @@ function update() {
         if (keys.a || keys.arrowleft) { dx -= Math.cos(yaw) * PLAYER_SPEED; dz += Math.sin(yaw) * PLAYER_SPEED; }
         if (keys.d || keys.arrowright) { dx += Math.cos(yaw) * PLAYER_SPEED; dz -= Math.sin(yaw) * PLAYER_SPEED; }
 
-        if (maze[Math.floor(player.y)][Math.floor(player.x + dx)] === 0) player.x += dx;
-        if (maze[Math.floor(player.y + dz)][Math.floor(player.x)] === 0) player.y += dz;
+        // 💡 수정: 벽 파고들기(시야 뚫림) 방지를 위한 충돌 여백(margin) 설정
+        let margin = 0.2; 
+        if (maze[Math.floor(player.y)][Math.floor(player.x + dx + Math.sign(dx) * margin)] === 0) player.x += dx;
+        if (maze[Math.floor(player.y + dz + Math.sign(dz) * margin)][Math.floor(player.x)] === 0) player.y += dz;
+        
         visited[Math.floor(player.y)][Math.floor(player.x)] = true;
         camera.position.set(player.x, 0, player.y);
 
         if (!devModeStop && isChaserActive) {
             let cdx = player.x - chaser.x, cdy = player.y - chaser.y;
             let dist = Math.sqrt(cdx*cdx + cdy*cdy);
-            chaser.x += (cdx / dist) * CHASER_SPEED; chaser.y += (cdy / dist) * CHASER_SPEED;
+            chaser.x += (cdx / dist) * CHASER_SPEED; 
+            chaser.y += (cdy / dist) * CHASER_SPEED;
+            
             if (dist < 0.6) { document.exitPointerLock(); gameState = GameState.QUIZ; fetchMathProblem(); }
         }
-        if (chaserMesh) chaserMesh.position.set(chaser.x, 0, chaser.y);
+        
+        // 💡 수정: 추적자 이동 & 굴러가는 애니메이션 적용
+        if (chaserMesh) {
+            chaserMesh.position.set(chaser.x, 0, chaser.y);
+            // x, y 이동량에 맞춰 회전값을 더해줌으로써 데굴데굴 굴러가는 느낌 부여
+            let cdx = player.x - chaser.x, cdy = player.y - chaser.y;
+            chaserMesh.rotation.x += (cdy * 0.05); 
+            chaserMesh.rotation.z -= (cdx * 0.05);
+        }
 
         if (Math.hypot(player.x - (exit.x + 0.5), player.y - (exit.y + 0.5)) < 0.8) {
             let time = ((Date.now() - gameStartTime) / 1000).toFixed(2);
             alert(`🎉 탈출 성공! 시간: ${time}초`);
-            window.saveGameStats({ clearTime: time, ...quizStats });
+            
+            // 💡 수정: ID(currentUserId)를 통계 데이터에 합쳐서 전송!
+            if (window.saveGameStats) {
+                window.saveGameStats({ playerId: currentUserId, clearTime: time, ...quizStats });
+            }
             resetGame();
+        }
         }
     } else if (gameState === GameState.QUIZ) {
         timeLeft -= 16.6; if (timeLeft <= 0) { alert("시간 초과!"); resetGame(); }
