@@ -1,79 +1,81 @@
+import os
+import requests
+import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import firebase_admin
 from firebase_admin import credentials, firestore
-import datetime
-import os
-import requests
+
+# 1. 환경 변수 로드 (로컬 .env 파일 읽기용)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 app = Flask(__name__)
-CORS(app) 
+CORS(app)
 
-# 환경 변수에서 키 읽기 (하드코딩된 API 키 완전 삭제!)
-CREDENTIAL_FILE = os.environ.get('FIREBASE_KEY_PATH', 'bloodborne-b1aae-firebase-adminsdk-fbsvc-aeb1b24d69.json')
+# 2. 정보 설정 (GitHub Secret 또는 .env에서 가져옴)
 GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
+# 파일 경로는 기본적으로 현재 폴더의 json 파일을 바라보게 설정
+CREDENTIAL_FILE = os.environ.get('FIREBASE_KEY_PATH', 'bloodborne-b1aae-firebase-adminsdk-fbsvc-aeb1b24d69.json')
 
-# 서버 시작 시 API 키가 있는지 확인
-if not GROQ_API_KEY:
-    print("🚨 경고: GROQ_API_KEY가 환경 변수에 설정되지 않았습니다!")
-
-# 1. Firebase 초기화
+# 3. Firebase 초기화
 try:
-    cred = credentials.Certificate(CREDENTIAL_FILE)
-    firebase_admin.initialize_app(cred)
-    db = firestore.client()
-    print("✅ Firebase 연동 성공!")
+    if os.path.exists(CREDENTIAL_FILE):
+        cred = credentials.Certificate(CREDENTIAL_FILE)
+        firebase_admin.initialize_app(cred)
+        db = firestore.client()
+        print("✅ Firebase 연동 성공!")
+    else:
+        print(f"❌ 키 파일을 찾을 수 없습니다: {CREDENTIAL_FILE}")
 except Exception as e:
-    print(f"❌ Firebase 연동 실패: {e}")
+    print(f"❌ Firebase 초기화 에러: {e}")
 
-# 2. 퀴즈 생성 엔드포인트 (Groq 통신 대행)
+# 4. AI 퀴즈 생성 로직
 @app.route('/generate_quiz', methods=['POST'])
 def generate_quiz():
+    if not GROQ_API_KEY:
+        return jsonify({"status": "error", "message": "API 키가 설정되지 않았습니다."}), 500
+
+    data = request.json
+    target_lang = data.get("targetLang", "Korean (한국어)")
+
+    prompt = (
+        f"너는 수학 선생님이야. 수능 난이도의 객관식 수학 문제를 만들어줘.\n"
+        f"언어: {target_lang}\n"
+        f"형식: JSON만 반환해. {{'question': '', 'options': ['', '', '', '', ''], 'answer': '1~5'}}"
+    )
+
     try:
-        data = request.json
-        target_lang = data.get("targetLang", "Korean (한국어)")
-        
-        prompt = f"너는 수능 수학 출제 위원이야. 미적분/기하/확통 중 하나를 골라 수능 28번 난이도의 객관식 문제를 1개 만들어.\n[필수 규칙]\n1. 문제는 억지스럽지 않고 논리적으로 완전히 완벽해야 해.\n2. 수식을 제외한 **모든 문제 지문과 보기 텍스트는 반드시 {target_lang}로 작성**해야 해!\n3. 무조건 아래 JSON 형식만 반환해:\n{{ \"question\": \"문제 텍스트\", \"options\": [\"1번\", \"2번\", \"3번\", \"4번\", \"5번\"], \"answer\": \"정답번호(1~5)\" }}"
-
-        headers = {
-            "Authorization": f"Bearer {GROQ_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "model": "llama-3.3-70b-versatile",
-            "messages": [{"role": "user", "content": prompt}],
-            "response_format": {"type": "json_object"},
-            "temperature": 0.2 
-        }
-        
-        response = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload)
-        response.raise_for_status() 
-        
+        response = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "llama-3.3-70b-versatile",
+                "messages": [{"role": "user", "content": prompt}],
+                "response_format": {"type": "json_object"}
+            }
+        )
         return jsonify(response.json()), 200
-
     except Exception as e:
-        print(f"❌ Groq API 에러: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# 3. 통계 저장 엔드포인트
+# 5. 게임 결과 저장
 @app.route('/save_stats', methods=['POST'])
 def save_stats():
     try:
         data = request.json
-        doc_data = {
-            "clearTime": data.get("clearTime"),
-            "totalAttempted": data.get("totalAttempted"),
-            "correctAnswers": data.get("correctAnswers"),
-            "wrongQuestions": data.get("wrongQuestions"),
-            "timestamp": datetime.datetime.now()
-        }
-        db.collection('game_clears').add(doc_data)
-        print(f"📊 게임 결과 저장 완료: {data.get('clearTime')}초 클리어")
-        return jsonify({"status": "success", "message": "Firebase 저장 완료"}), 200
+        data['timestamp'] = datetime.datetime.now()
+        db.collection('game_clears').add(data)
+        return jsonify({"status": "success"}), 200
     except Exception as e:
-        print(f"❌ 에러 발생: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == '__main__':
-    print("🚀 백엔드 서버가 실행되었습니다. (http://localhost:5000)")
-    app.run(port=5000)
+    print("🚀 서버 실행 중: http://localhost:5000")
+    app.run(host='0.0.0.0', port=5000)
