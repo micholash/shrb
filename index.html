@@ -2,15 +2,14 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>AI 수학 미로 탈출 - 백룸 심연 모드</title>
+    <title>미로 탈출</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
-        import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+        import { getDatabase, ref, push } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
 
-        // 요청하신 Firebase 설정값 그대로 적용
         const firebaseConfig = {
             apiKey: "AIzaSyA7kuCSB9UsaCtOYIhsQGuil0-g5rIh_Fs",
             authDomain: "bloodborne-b1aae.firebaseapp.com",
@@ -23,17 +22,20 @@
         };
 
         const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
+        const db = getDatabase(app); // Realtime Database 초기화
 
         window.saveGameStats = async function(stats) {
             try {
-                await addDoc(collection(db, "game_clears"), {
+                // 'game_clears' 경로에 데이터를 push(추가)합니다.
+                const statsRef = ref(db, 'game_clears');
+                await push(statsRef, {
                     ...stats,
-                    timestamp: new Date()
+                    serverTimestamp: new Date().toISOString()
                 });
-                console.log("✅ 통계가 Firebase에 저장되었습니다.");
+                console.log("✅ 통계가 Realtime Database에 저장되었습니다.");
             } catch (e) {
                 console.error("❌ 저장 실패:", e);
+                alert("데이터 저장 중 오류가 발생했습니다: " + e.message);
             }
         };
     </script>
@@ -48,7 +50,7 @@
     <div id="game-container">
         <canvas id="gameCanvas" width="800" height="500"></canvas>
         <canvas id="minimap" width="150" height="150"></canvas>
-        <div id="instruction">화면을 클릭하여 심연으로 진입하세요<br>(마우스 고정 해제: ESC)</div>
+        <div id="instruction">화면을 클릭하여 진입하세요<br>(마우스 고정 해제: ESC)</div>
     </div>
 
     <script src="script.js"></script>
