@@ -1,64 +1,134 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8">
-    <title>미로 탈출</title>
-    <link rel="stylesheet" href="style.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-
-    <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
-    import { getDatabase, ref, push } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-database.js";
-
-    const firebaseConfig = {
-        apiKey: "AIzaSyA7kuCSB9UsaCtOYIhsQGuil0-g5rIh_Fs",
-        authDomain: "bloodborne-b1aae.firebaseapp.com",
-        databaseURL: "https://bloodborne-b1aae-default-rtdb.asia-southeast1.firebasedatabase.app",
-        projectId: "bloodborne-b1aae",
-        storageBucket: "bloodborne-b1aae.firebasestorage.app",
-        messagingSenderId: "415284045901",
-        appId: "1:415284045901:web:ec45dcb66a955811c45404",
-        measurementId: "G-N1MV59ZVQV"
-    };
-
-    const app = initializeApp(firebaseConfig);
-    const db = getDatabase(app);
-
-    // 기존 게임 로직(script.js)에서 호출하던 함수 그대로 사용 가능하게 덮어씌움
-    window.saveGameStats = async function(stats) {
-        try {
-            const statsRef = ref(db, 'game_clears');
-            await push(statsRef, {
-                ...stats,
-                serverTimestamp: new Date().toISOString()
-            });
-            console.log("✅ 통계가 Realtime Database에 저장되었습니다.");
-        } catch (e) {
-            console.error("❌ 저장 실패:", e);
-        }
-    };
-</script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>장기 (Korean Chess) — AI 대전</title>
+  <link rel="stylesheet" href="style.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;700;900&family=Cinzel:wght@400;700&display=swap" rel="stylesheet"/>
 </head>
 <body>
-    <div id="math-panel" class="hidden"> 
+  <div class="bg-pattern"></div>
+  <div class="wrapper">
+    <header class="header">
+      <div class="header-deco left">將</div>
+      <div class="header-center">
+        <h1 class="title">장&nbsp;&nbsp;기</h1>
+        <p class="subtitle">Korean Chess · 朝鮮將棋 · AI 대전</p>
+      </div>
+      <div class="header-deco right">棋</div>
+    </header>
 
 
-
-
-
-
-        <div id="question-text" class="question">문제를 생성 중입니다...</div>
-        <div id="options-text" class="options"></div>
-        <div class="timer-bar"><div id="timer-fill"></div></div>
+    <!-- 사이드/난이도 선택 -->
+    <div class="pre-game-panel" id="pre-game-panel">
+      <div class="pre-row">
+        <div class="pre-group">
+          <div class="pre-label">나의 진영</div>
+          <div class="pre-btns">
+            <button class="pre-btn active" id="play-as-G" onclick="setPlayerSide('G')">초 (楚) 플레이</button>
+            <button class="pre-btn" id="play-as-R" onclick="setPlayerSide('R')">한 (漢) 플레이</button>
+          </div>
+        </div>
+        <div class="pre-group">
+          <div class="pre-label">AI 난이도</div>
+          <div class="pre-btns">
+            <button class="pre-btn" id="diff-1" onclick="setDifficulty(1)">쉬움 (깊이 1)</button>
+            <button class="pre-btn active" id="diff-3" onclick="setDifficulty(3)">보통 (깊이 3)</button>
+            <button class="pre-btn" id="diff-5" onclick="setDifficulty(5)">어려움 (깊이 5)</button>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <div id="game-container">
-        <canvas id="gameCanvas" width="800" height="500"></canvas>
-        <canvas id="minimap" width="150" height="150"></canvas>
-        <div id="instruction">화면을 클릭하여 진입하세요<br>(마우스 고정 해제: ESC)</div>
+
+    <div class="game-area">
+      <div class="side-panel panel-green">
+        <div class="player-label green" id="label-G">초 (楚)</div>
+        <div class="captured-area">
+          <div class="captured-title">잡은 말</div>
+          <div class="captured-pieces" id="captured-pieces-G"></div>
+        </div>
+        <div class="score-display" id="score-G">점수: 0</div>
+        <div class="setup-section">
+          <div class="setup-title">초 차림</div>
+          <div class="setup-btns">
+            <button class="setup-btn active" id="g-default" onclick="setLayout('G','default')">기본</button>
+            <button class="setup-btn" id="g-inner"   onclick="setLayout('G','inner')">안상</button>
+            <button class="setup-btn" id="g-outer"   onclick="setLayout('G','outer')">바깥상</button>
+          </div>
+        </div>
+      </div>
+
+
+      <div class="board-container">
+        <canvas id="janggiBoard" width="540" height="600"></canvas>
+        <div class="board-label-row">
+          <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span>
+          <span>6</span><span>7</span><span>8</span><span>9</span>
+        </div>
+      </div>
+
+
+      <div class="side-panel panel-red">
+        <div class="player-label red" id="label-R">한 (漢)</div>
+        <div class="captured-area">
+          <div class="captured-title">잡은 말</div>
+          <div class="captured-pieces" id="captured-pieces-R"></div>
+        </div>
+        <div class="score-display" id="score-R">점수: 0 (+1.5)</div>
+        <div class="setup-section">
+          <div class="setup-title">한 차림</div>
+          <div class="setup-btns">
+            <button class="setup-btn active" id="r-default" onclick="setLayout('R','default')">기본</button>
+            <button class="setup-btn" id="r-inner"   onclick="setLayout('R','inner')">안상</button>
+            <button class="setup-btn" id="r-outer"   onclick="setLayout('R','outer')">바깥상</button>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <script src="script.js"></script>
+
+    <div class="status-bar">
+      <div class="turn-indicator">
+        <span class="turn-dot green-dot" id="turn-dot"></span>
+        <span id="turn-text">초(楚) 선공 · 차림을 선택하세요</span>
+      </div>
+      <div class="btn-group">
+        <button class="ctrl-btn" id="start-btn" onclick="startGame()">게임 시작</button>
+        <button class="ctrl-btn pass-btn" id="pass-btn" onclick="passTurn()" disabled>한수쉼</button>
+        <button class="ctrl-btn reset-btn" onclick="resetGame()">처음으로</button>
+      </div>
+    </div>
+
+
+    <div class="legend">
+      <div class="legend-item"><span class="l-dot green-dot"></span> 초(楚): 卒 졸, 包 포, 馬 마, 象 상, 車 차, 士 사, 楚 궁</div>
+      <div class="legend-item"><span class="l-dot red-dot"></span>  한(漢): 兵 병, 包 포, 馬 마, 象 상, 車 차, 士 사, 漢 궁</div>
+    </div>
+  </div>
+
+
+  <div class="modal-overlay" id="modal" style="display:none">
+    <div class="modal">
+      <div class="modal-deco">☰</div>
+      <h2 class="modal-title" id="modal-title">게임 종료</h2>
+      <p class="modal-msg" id="modal-msg"></p>
+      <button class="ctrl-btn" onclick="resetGame()">다시 시작</button>
+    </div>
+  </div>
+
+
+  <!-- AI 생각 중 오버레이 -->
+  <div class="think-overlay" id="think-overlay" style="display:none">
+    <div class="think-box">
+      <div class="think-spinner"></div>
+      <div class="think-text">AI 생각 중…</div>
+    </div>
+  </div>
+
+
+  <script src="script.js"></script>
 </body>
 </html>
 
