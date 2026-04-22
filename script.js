@@ -1,285 +1,901 @@
-const GROQ_API_KEY = "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";
-
-const canvas3D = document.getElementById("gameCanvas");
-const renderer = new THREE.WebGLRenderer({ canvas: canvas3D, antialias: true });
-renderer.setSize(800, 500);
-const scene = new THREE.Scene();
-
-const mCanvas = document.getElementById("minimap");
-const mCtx = mCanvas.getContext("2d");
-
-const bgColor = 0x0a0a0a;
-scene.background = new THREE.Color(bgColor); 
-scene.fog = new THREE.Fog(bgColor, 1, 15); // 💡 수정: 시야를 훨씬 멀리까지 보이게 늘림
-const camera = new THREE.PerspectiveCamera(75, 800/500, 0.1, 100);
-
-const COLS = 32, ROWS = 20;
-let maze = [], visited = [];
-const PLAYER_SPEED = 0.06;
-const CHASER_SPEED = PLAYER_SPEED * 1.2;
-
-let player = { x: 1.5, y: 1.5 }; 
-let exit = { x: COLS - 2.5, y: ROWS - 2.5 };
-let chaser = { x: 0, y: 0 }; 
-
-let pitch = 0, yaw = 0; 
-// 기존 코드에서 keys 선언된 부분을 찾아서 이렇게 arrow 속성을 추가하세요.
-const keys = { w: false, a: false, s: false, d: false, arrowup: false, arrowdown: false, arrowleft: false, arrowright: false };
-
-const GameState = { READY: -1, PLAYING: 0, QUIZ: 1, GAMEOVER: 2 };
-let gameState = GameState.READY; 
-
-let devModeStop = false; 
-let isChaserActive = true; 
+/* =============================================
+   장기 (Korean Chess) — script.js
+   버전: Minimax AI (Alpha-Beta Pruning)
+   - 플레이어 진영 선택 (초/한)
+   - AI 난이도 3단계 (깊이 1/3/5)
+   - 완전한 장기 규칙 구현
+   ============================================= */
 
 
+const canvas = document.getElementById('janggiBoard');
+const ctx    = canvas.getContext('2d');
 
 
+const SPACING = 60;
+const MARGIN  = 30;
+const COLS    = 9;
+const ROWS    = 10;
 
 
+// ── 상태 ──────────────────────────────────────
+let board         = [];
+let selected      = null;
+let possibleMoves = [];
+let currentTurn   = 'G';
+let gameStarted   = false;
+let passCount     = 0;
+let capturedG     = [];
+let capturedR     = [];
+let layoutG       = 'default';
+let layoutR       = 'default';
 
 
+// AI 설정
+let playerSide  = 'G';   // 플레이어 진영
+let aiSide      = 'R';   // AI 진영
+let aiDepth     = 3;     // 탐색 깊이
+let aiThinking  = false; // AI 생각 중 플래그
 
 
+// ── 기물 점수표 ─────────────────────────────────
+const PIECE_SCORE = { chariot:13, cannon:7, horse:5, elephant:3, advisor:3, pawn:2, king:0 };
 
 
+// AI 평가 점수 (Minimax용, 더 세밀하게)
+const EVAL_WEIGHTS = {
+  king:9999, chariot:130, cannon:70, horse:50, elephant:30, advisor:30, pawn:20
+};
 
 
-
-
-let currentQuestionStr = "", currentAnswer = "";
-let timeLeft = 60000; const MAX_TIME = 60000;
-let gameStartTime = 0;
-let quizStats = { totalAttempted: 0, correctAnswers: 0, wrongQuestions: [] };
-
-let wallMeshes = [], chaserMesh, exitMesh, chaserTexture;
-
-function generateMaze(width, height) {
-    let newMaze = Array(height).fill().map(() => Array(width).fill(1));
-    visited = Array(height).fill().map(() => Array(width).fill(false));
-    function carve(cx, cy) {
-        newMaze[cy][cx] = 0;
-        let dirs = [[0,-2],[0,2],[-2,0],[2,0]].sort(() => Math.random() - 0.5);
-        for (let [dx, dy] of dirs) {
-            let nx = cx + dx, ny = cy + dy;
-            if (nx >= 1 && nx < width - 1 && ny >= 1 && ny < height - 1 && newMaze[ny][nx] === 1) {
-                newMaze[cy + dy/2][cx + dx/2] = 0; carve(nx, ny);
-            }
-        }
-    }
-    carve(1, 1);
-    newMaze[Math.floor(exit.y)][Math.floor(exit.x)] = 0;
-    return newMaze;
+// ── 궁성 ──────────────────────────────────────
+function isInPalace(r, c) {
+  return (r >= 0 && r <= 2 && c >= 3 && c <= 5) ||
+         (r >= 7 && r <= 9 && c >= 3 && c <= 5);
 }
 
-function build3DWorld() {
-    wallMeshes.forEach(w => scene.remove(w));
-    wallMeshes = [];
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7); // 💡 수정: 빛의 강도를 0.15에서 0.7로 대폭 상승
-    scene.add(ambientLight);
-    const wallGeo = new THREE.BoxGeometry(1, 1, 1);
-    const wallMat = new THREE.MeshLambertMaterial({ color: 0x6A5832 }); 
-    for(let r=0; r<ROWS; r++) {
-        for(let c=0; c<COLS; c++) {
-            if(maze[r][c] === 1) {
-                let w = new THREE.Mesh(wallGeo, wallMat);
-                w.position.set(c + 0.5, 0, r + 0.5);
-                scene.add(w);
-                wallMeshes.push(w);
-            }
-        }
-    }
-    const floorGeo = new THREE.PlaneGeometry(COLS, ROWS);
-    const floorMat = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
-    const floor = new THREE.Mesh(floorGeo, floorMat);
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.set(COLS/2, -0.5, ROWS/2);
-    scene.add(floor);
 
-    if(!exitMesh) {
-        exitMesh = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), new THREE.MeshLambertMaterial({color: 0x00ff00}));
-        scene.add(exitMesh);
-    }
-    exitMesh.position.set(exit.x + 0.5, 0, exit.y + 0.5);
+const PALACE_DIAG_LINES = [
+  [[0,3],[1,4],[2,5]], [[0,5],[1,4],[2,3]],
+  [[7,3],[8,4],[9,5]], [[7,5],[8,4],[9,3]],
+];
 
-    if(!chaserMesh && chaserTexture) {
-        chaserMesh = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7), new THREE.MeshBasicMaterial({ map: chaserTexture }));
-        scene.add(chaserMesh);
-    }
+
+function isOnPalaceDiag(r, c) {
+  for (const line of PALACE_DIAG_LINES)
+    for (const [lr, lc] of line)
+      if (lr===r && lc===c) return true;
+  return false;
 }
 
-function spawnChaserRandomly() {
-    let valid = false; let rx, ry;
-    while(!valid) {
-        rx = Math.random() * (COLS - 2) + 1;
-        ry = Math.random() * (ROWS - 2) + 1;
-        if (Math.hypot(rx - player.x, ry - player.y) >= 5) valid = true;
-    }
-    chaser.x = rx; chaser.y = ry;
-    isChaserActive = true;
-    if(chaserMesh) chaserMesh.visible = true;
+
+function arePalaceDiagAdjacent(r1, c1, r2, c2) {
+  if (!isOnPalaceDiag(r1,c1) || !isOnPalaceDiag(r2,c2)) return false;
+  const samePalace = (r1<=2 && r2<=2) || (r1>=7 && r2>=7);
+  if (!samePalace) return false;
+  return Math.abs(r1-r2)===1 && Math.abs(c1-c2)===1;
 }
 
-async function fetchMathProblem() {
-    if (gameState !== GameState.QUIZ) return;
-    document.getElementById("math-panel").classList.remove("hidden");
-    const prompt = `수능 수학 미적분/기하/확통 중 수능 28번 난이도 객관식 문제 1개 생성. 무조건 JSON 반환: { "question": "문제", "options": ["1","2","3","4","5"], "answer": "1~5" }`;
-    try {
-        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-            method: "POST",
-            headers: { "Authorization": `Bearer ${GROQ_API_KEY}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ model: "llama-3.3-70b-versatile", messages: [{ role: "user", content: prompt }], response_format: { type: "json_object" } })
-        });
-        const data = await response.json();
-        const quiz = JSON.parse(data.choices[0].message.content);
-        currentQuestionStr = quiz.question; 
-        document.getElementById("question-text").innerText = quiz.question;
-        document.getElementById("options-text").innerHTML = quiz.options.map((opt, i) => `<span style="margin:0 10px;">(${i+1}) ${opt}</span>`).join("");
-        currentAnswer = quiz.answer.toString();
-        timeLeft = MAX_TIME;
-    } catch (e) { document.getElementById("question-text").innerText = "오류 발생. 새로고침 하세요."; }
+
+// ── 보드 초기화 ────────────────────────────────
+function createEmptyBoard() {
+  return Array.from({length: ROWS}, () => Array(COLS).fill(null));
 }
 
-// 이벤트 핸들러 (기존 코드 덮어쓰기)
-document.addEventListener("click", () => {
-    // 화면 전체(document) 어디를 클릭해도 마우스 고정 활성화
-    if (gameState === GameState.READY || gameState === GameState.PLAYING) {
-        canvas3D.requestPointerLock();
-    }
-});
 
-document.addEventListener("pointerlockchange", () => {
-    if (document.pointerLockElement === canvas3D) {
-        if (gameState === GameState.READY) {
-            gameState = GameState.PLAYING;
-            if (gameStartTime === 0) gameStartTime = Date.now();
-        }
-        document.getElementById("instruction").style.display = "none";
-    } else {
-        if (gameState === GameState.PLAYING) {
-            gameState = GameState.READY;
-            document.getElementById("instruction").innerText = "화면을 클릭하여 계속하세요\n(개발자 모드: Ctrl + F)";
-            document.getElementById("instruction").style.display = "block";
-        }
-    }
-});
-
-document.addEventListener("mousemove", (e) => {
-    if (document.pointerLockElement === canvas3D && gameState === GameState.PLAYING) {
-        yaw -= e.movementX * 0.002;
-        pitch -= e.movementY * 0.002;
-        pitch = Math.max(-Math.PI/2, Math.min(Math.PI/2, pitch)); 
-        camera.rotation.set(pitch, yaw, 0, 'YXZ');
-    }
-});
-
-window.addEventListener("keydown", (e) => {
-    if (e.ctrlKey && e.key.toLowerCase() === 'f') {
-        e.preventDefault(); devModeStop = !devModeStop;
-        console.log(devModeStop ? "🛠️ 추격자 정지" : "🛠️ 추격자 재개"); return;
-    }
-    const key = e.key.toLowerCase();
-    if (keys.hasOwnProperty(key)) keys[key] = true;
-
-    if (gameState === GameState.QUIZ && ["1","2","3","4","5"].includes(e.key)) {
-        quizStats.totalAttempted++; 
-        if (e.key === currentAnswer) {
-            quizStats.correctAnswers++; 
-            document.getElementById("math-panel").classList.add("hidden");
-            spawnChaserRandomly();
-            gameState = GameState.READY;
-            document.getElementById("instruction").innerText = "화면을 클릭하여 심연으로 진입하세요";
-            document.getElementById("instruction").style.display = "block";
-        } else {
-            alert("오답!"); resetGame();
-        }
-    }
-});
-
-window.addEventListener("keyup", (e) => {
-    const key = e.key.toLowerCase(); if (keys.hasOwnProperty(key)) keys[key] = false;
-});
-
-// 기존 update() 함수 전체를 이걸로 덮어쓰세요!
-function update() {
-    // 💡 게임 진행 중(PLAYING)일 때만 위치 계산 및 이동을 하도록 통째로 감싸줍니다.
-    if (gameState === GameState.PLAYING) {
-        let dx = 0, dz = 0;
-        if (keys.w || keys.arrowup) { dx -= Math.sin(yaw) * PLAYER_SPEED; dz -= Math.cos(yaw) * PLAYER_SPEED; }
-        if (keys.s || keys.arrowdown) { dx += Math.sin(yaw) * PLAYER_SPEED; dz += Math.cos(yaw) * PLAYER_SPEED; }
-        if (keys.a || keys.arrowleft) { dx -= Math.cos(yaw) * PLAYER_SPEED; dz += Math.sin(yaw) * PLAYER_SPEED; }
-        if (keys.d || keys.arrowright) { dx += Math.cos(yaw) * PLAYER_SPEED; dz -= Math.sin(yaw) * PLAYER_SPEED; }
-
-        // 벽 파고들기 방지 & 맵 바깥(undefined) 접근 에러 방지
-        let margin = 0.2; 
-        if (maze[Math.floor(player.y)] && maze[Math.floor(player.y)][Math.floor(player.x + dx + Math.sign(dx) * margin)] === 0) player.x += dx;
-        if (maze[Math.floor(player.y + dz + Math.sign(dz) * margin)] && maze[Math.floor(player.y + dz + Math.sign(dz) * margin)][Math.floor(player.x)] === 0) player.y += dz;
-        
-        visited[Math.floor(player.y)][Math.floor(player.x)] = true;
-        camera.position.set(player.x, 0, player.y);
-
-        if (!devModeStop && isChaserActive) {
-            let cdx = player.x - chaser.x, cdy = player.y - chaser.y;
-            let dist = Math.sqrt(cdx*cdx + cdy*cdy);
-            chaser.x += (cdx / dist) * CHASER_SPEED; 
-            chaser.y += (cdy / dist) * CHASER_SPEED;
-            
-            if (dist < 0.6) { document.exitPointerLock(); gameState = GameState.QUIZ; fetchMathProblem(); }
-        }
-        
-        // 추적자 이동 애니메이션
-        if (chaserMesh) {
-            chaserMesh.position.set(chaser.x, 0, chaser.y);
-            let cdx = player.x - chaser.x, cdy = player.y - chaser.y;
-            chaserMesh.rotation.x += (cdy * 0.05); 
-            chaserMesh.rotation.z -= (cdx * 0.05);
-        }
-
-        // 탈출구 도달
-        if (Math.hypot(player.x - (exit.x + 0.5), player.y - (exit.y + 0.5)) < 0.8) {
-            let time = ((Date.now() - gameStartTime) / 1000).toFixed(2);
-            alert(`🎉 탈출 성공! 시간: ${time}초`);
-            if(window.saveGameStats) window.saveGameStats({ clearTime: time, ...quizStats });
-            resetGame();
-        }
-
-    } else if (gameState === GameState.QUIZ) {
-        timeLeft -= 16.6; 
-        if (timeLeft <= 0) { alert("시간 초과!"); resetGame(); }
-        const timerFill = document.getElementById("timer-fill");
-        if(timerFill) timerFill.style.width = (timeLeft / MAX_TIME * 100) + "%";
-    }
+function getHorsElephPos(layout) {
+  if (layout === 'inner')  return ['horse','elephant','horse','elephant'];
+  if (layout === 'outer')  return ['elephant','horse','elephant','horse'];
+  return                          ['horse','elephant','elephant','horse'];
 }
 
-function drawMinimap() {
-    mCtx.fillStyle = "#000"; mCtx.fillRect(0, 0, mCanvas.width, mCanvas.height);
-    const sw = mCanvas.width / COLS, sh = mCanvas.height / ROWS;
-    for (let y = 0; y < ROWS; y++) {
-        for (let x = 0; x < COLS; x++) {
-            if (visited[y][x]) {
-                mCtx.fillStyle = maze[y][x] === 1 ? "#443" : "#111";
-                mCtx.fillRect(x * sw, y * sh, sw, sh);
-            }
-        }
-    }
-    mCtx.fillStyle = "red"; mCtx.fillRect(chaser.x * sw - 2, chaser.y * sh - 2, 4, 4);
-    mCtx.fillStyle = "white"; mCtx.fillRect(player.x * sw - 2, player.y * sh - 2, 4, 4);
+
+function initBoard() {
+  board = createEmptyBoard();
+  const [g1,g2,g6,g7] = getHorsElephPos(layoutG);
+  const [r1,r2,r6,r7] = getHorsElephPos(layoutR);
+  const HN = { horse:'馬', elephant:'象' };
+
+
+  board[1][4]=mk('G','king','楚'); board[0][3]=mk('G','advisor','士'); board[0][5]=mk('G','advisor','士');
+  board[0][0]=mk('G','chariot','車'); board[0][8]=mk('G','chariot','車');
+  board[0][1]=mk('G',g1,HN[g1]); board[0][2]=mk('G',g2,HN[g2]);
+  board[0][6]=mk('G',g6,HN[g6]); board[0][7]=mk('G',g7,HN[g7]);
+  board[2][1]=mk('G','cannon','包'); board[2][7]=mk('G','cannon','包');
+  board[3][0]=mk('G','pawn','卒'); board[3][2]=mk('G','pawn','卒'); board[3][4]=mk('G','pawn','卒');
+  board[3][6]=mk('G','pawn','卒'); board[3][8]=mk('G','pawn','卒');
+
+
+  board[8][4]=mk('R','king','漢'); board[9][3]=mk('R','advisor','士'); board[9][5]=mk('R','advisor','士');
+  board[9][0]=mk('R','chariot','車'); board[9][8]=mk('R','chariot','車');
+  board[9][1]=mk('R',r1,HN[r1]); board[9][2]=mk('R',r2,HN[r2]);
+  board[9][6]=mk('R',r6,HN[r6]); board[9][7]=mk('R',r7,HN[r7]);
+  board[7][1]=mk('R','cannon','包'); board[7][7]=mk('R','cannon','包');
+  board[6][0]=mk('R','pawn','兵'); board[6][2]=mk('R','pawn','兵'); board[6][4]=mk('R','pawn','兵');
+  board[6][6]=mk('R','pawn','兵'); board[6][8]=mk('R','pawn','兵');
 }
+
+
+function mk(side, type, name) { return { side, type, name }; }
+
+
+// ── 이동 규칙 ──────────────────────────────────
+function getPossibleMoves(piece, r, c, brd) {
+  brd = brd || board;
+  const moves = [];
+  const { type, side } = piece;
+  if (type==='king')     kingAdvisorMoves(r,c,side,brd,moves,true);
+  else if (type==='advisor')  kingAdvisorMoves(r,c,side,brd,moves,false);
+  else if (type==='chariot')  chariotMoves(r,c,side,brd,moves);
+  else if (type==='cannon')   cannonMoves(r,c,side,brd,moves);
+  else if (type==='horse')    horseMoves(r,c,side,brd,moves);
+  else if (type==='elephant') elephantMoves(r,c,side,brd,moves);
+  else if (type==='pawn')     pawnMoves(r,c,side,brd,moves);
+  return moves;
+}
+
+
+function inBounds(r,c) { return r>=0 && r<ROWS && c>=0 && c<COLS; }
+function canLand(nr,nc,side,brd) {
+  return inBounds(nr,nc) && (!brd[nr][nc] || brd[nr][nc].side!==side);
+}
+
+
+function kingAdvisorMoves(r,c,side,brd,moves,isKing) {
+  for (const [dr,dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+    const nr=r+dr,nc=c+dc;
+    if (isInPalace(nr,nc) && canLand(nr,nc,side,brd)) moves.push([nr,nc]);
+  }
+  for (const [dr,dc] of [[-1,-1],[-1,1],[1,-1],[1,1]]) {
+    const nr=r+dr,nc=c+dc;
+    if (isInPalace(nr,nc) && arePalaceDiagAdjacent(r,c,nr,nc) && canLand(nr,nc,side,brd))
+      moves.push([nr,nc]);
+  }
+}
+
+
+function chariotMoves(r,c,side,brd,moves) {
+  for (const [dr,dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+    for (let i=1; i<Math.max(ROWS,COLS); i++) {
+      const nr=r+dr*i,nc=c+dc*i;
+      if (!inBounds(nr,nc)) break;
+      if (brd[nr][nc]) { if (brd[nr][nc].side!==side) moves.push([nr,nc]); break; }
+      moves.push([nr,nc]);
+    }
+  }
+  if (isOnPalaceDiag(r,c)) {
+    for (const [dr,dc] of [[-1,-1],[-1,1],[1,-1],[1,1]]) {
+      for (let i=1; i<=2; i++) {
+        const nr=r+dr*i,nc=c+dc*i;
+        if (!inBounds(nr,nc)||!isInPalace(nr,nc)||!isOnPalaceDiag(nr,nc)) break;
+        if (brd[nr][nc]) { if (brd[nr][nc].side!==side) moves.push([nr,nc]); break; }
+        moves.push([nr,nc]);
+      }
+    }
+  }
+}
+
+
+function cannonMoves(r,c,side,brd,moves) {
+  for (const [dr,dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+    let jumped=false;
+    for (let i=1; i<Math.max(ROWS,COLS); i++) {
+      const nr=r+dr*i,nc=c+dc*i;
+      if (!inBounds(nr,nc)) break;
+      if (brd[nr][nc]) {
+        if (!jumped) { if (brd[nr][nc].type==='cannon') break; jumped=true; }
+        else { if (brd[nr][nc].type==='cannon') break; if (brd[nr][nc].side!==side) moves.push([nr,nc]); break; }
+      } else { if (jumped) moves.push([nr,nc]); }
+    }
+  }
+  if (isOnPalaceDiag(r,c)) {
+    for (const [dr,dc] of [[-1,-1],[-1,1],[1,-1],[1,1]]) {
+      let jumped=false;
+      for (let i=1; i<=2; i++) {
+        const nr=r+dr*i,nc=c+dc*i;
+        if (!inBounds(nr,nc)||!isInPalace(nr,nc)||!isOnPalaceDiag(nr,nc)) break;
+        if (brd[nr][nc]) {
+          if (!jumped) { if (brd[nr][nc].type==='cannon') break; jumped=true; }
+          else { if (brd[nr][nc].type==='cannon') break; if (brd[nr][nc].side!==side) moves.push([nr,nc]); break; }
+        } else { if (jumped) moves.push([nr,nc]); }
+      }
+    }
+  }
+}
+
+
+function horseMoves(r,c,side,brd,moves) {
+  const paths=[
+    [[-1,0],[-2,-1]],[[-1,0],[-2,1]],[[1,0],[2,-1]],[[1,0],[2,1]],
+    [[0,-1],[-1,-2]],[[0,-1],[1,-2]],[[0,1],[-1,2]],[[0,1],[1,2]],
+  ];
+  for (const [[mr,mc],[nr,nc]] of paths) {
+    const er=r+mr,ec=c+mc,fr=r+nr,fc=c+nc;
+    if (!inBounds(er,ec)) continue;
+    if (brd[er][ec]) continue;
+    if (inBounds(fr,fc) && canLand(fr,fc,side,brd)) moves.push([fr,fc]);
+  }
+}
+
+
+function elephantMoves(r,c,side,brd,moves) {
+  const paths=[
+    [[-1,0],[-2,-1],[-3,-2]],[[-1,0],[-2,1],[-3,2]],
+    [[1,0],[2,-1],[3,-2]],[[1,0],[2,1],[3,2]],
+    [[0,-1],[-1,-2],[-2,-3]],[[0,-1],[1,-2],[2,-3]],
+    [[0,1],[-1,2],[-2,3]],[[0,1],[1,2],[2,3]],
+  ];
+  for (const [d1,d2,[dr,dc]] of paths) {
+    const b1r=r+d1[0],b1c=c+d1[1],b2r=r+d2[0],b2c=c+d2[1],nr=r+dr,nc=c+dc;
+    if (!inBounds(b1r,b1c)||!inBounds(b2r,b2c)) continue;
+    if (brd[b1r][b1c]||brd[b2r][b2c]) continue;
+    if (inBounds(nr,nc) && canLand(nr,nc,side,brd)) moves.push([nr,nc]);
+  }
+}
+
+
+function pawnMoves(r,c,side,brd,moves) {
+  const forward=side==='G'?1:-1;
+  const deltas=[[forward,0],[0,-1],[0,1]];
+  if (isOnPalaceDiag(r,c)) deltas.push([forward,-1],[forward,1]);
+  for (const [dr,dc] of deltas) {
+    const nr=r+dr,nc=c+dc;
+    if (!inBounds(nr,nc)) continue;
+    if (Math.abs(dr)===1&&Math.abs(dc)===1) {
+      if (!isInPalace(r,c)||!arePalaceDiagAdjacent(r,c,nr,nc)) continue;
+    }
+    if (canLand(nr,nc,side,brd)) moves.push([nr,nc]);
+  }
+}
+
+
+// ── 체크/장군 ──────────────────────────────────
+function isInCheck(side, brd) {
+  let kr=-1,kc=-1;
+  for (let r=0;r<ROWS;r++) for (let c=0;c<COLS;c++)
+    if (brd[r][c]&&brd[r][c].side===side&&brd[r][c].type==='king') { kr=r;kc=c; }
+  if (kr===-1) return false;
+  const enemy=side==='G'?'R':'G';
+  for (let r=0;r<ROWS;r++) for (let c=0;c<COLS;c++) {
+    const p=brd[r][c];
+    if (!p||p.side!==enemy) continue;
+    if (getPossibleMoves(p,r,c,brd).some(([mr,mc])=>mr===kr&&mc===kc)) return true;
+  }
+  return false;
+}
+
+
+function moveResultsInSelfCheck(fr,fc,tr,tc,side) {
+  const nb=cloneBoard(board);
+  nb[tr][tc]=nb[fr][fc]; nb[fr][fc]=null;
+  return isInCheck(side,nb);
+}
+
+
+function cloneBoard(brd) {
+  return brd.map(row=>row.map(cell=>cell?{...cell}:null));
+}
+
+
+function getLegalMoves(piece,r,c) {
+  return getPossibleMoves(piece,r,c,board)
+    .filter(([tr,tc])=>!moveResultsInSelfCheck(r,c,tr,tc,piece.side));
+}
+
+
+function isCheckmate(side) {
+  for (let r=0;r<ROWS;r++) for (let c=0;c<COLS;c++) {
+    const p=board[r][c];
+    if (!p||p.side!==side) continue;
+    if (getLegalMoves(p,r,c).length>0) return false;
+  }
+  return true;
+}
+
+
+function isBikjang() {
+  let gkr=-1,gkc=-1,rkr=-1,rkc=-1;
+  for (let r=0;r<ROWS;r++) for (let c=0;c<COLS;c++) {
+    const p=board[r][c];
+    if (!p) continue;
+    if (p.side==='G'&&p.type==='king'){gkr=r;gkc=c;}
+    if (p.side==='R'&&p.type==='king'){rkr=r;rkc=c;}
+  }
+  if (gkc!==rkc) return false;
+  const minR=Math.min(gkr,rkr),maxR=Math.max(gkr,rkr);
+  for (let r=minR+1;r<maxR;r++) if (board[r][gkc]) return false;
+  return true;
+}
+
+
+function calcScore(side) {
+  let s=0;
+  const captured=side==='G'?capturedG:capturedR;
+  for (const p of captured) s+=PIECE_SCORE[p.type]||0;
+  return s;
+}
+
+
+// ══════════════════════════════════════════════
+//  AI — Minimax + Alpha-Beta Pruning
+// ══════════════════════════════════════════════
+
+
+// 보드 평가: 양수 = R(한) 유리, 음수 = G(초) 유리
+function evaluateBoard(brd) {
+  let score = 0;
+
+
+  // 기물 가치 합산
+  for (let r=0; r<ROWS; r++) {
+    for (let c=0; c<COLS; c++) {
+      const p = brd[r][c];
+      if (!p) continue;
+      const val = EVAL_WEIGHTS[p.type] || 0;
+      // 위치 보너스: 포/차는 중앙 열 선호
+      let posBonus = 0;
+      if (p.type==='pawn') {
+        // 졸/병: 상대방 진영에 있을수록 가치 높음
+        posBonus = p.side==='G' ? r*0.5 : (9-r)*0.5;
+      }
+      score += p.side==='R' ? (val+posBonus) : -(val+posBonus);
+    }
+  }
+
+
+  // 장군 상태 패널티
+  if (isInCheck('G', brd)) score += 80;
+  if (isInCheck('R', brd)) score -= 80;
+
+
+  return score;
+}
+
+
+function getAllMovesBrd(side, brd) {
+  const moves = [];
+  for (let r=0; r<ROWS; r++) {
+    for (let c=0; c<COLS; c++) {
+      const p = brd[r][c];
+      if (!p||p.side!==side) continue;
+      const raw = getPossibleMoves(p,r,c,brd);
+      for (const [tr,tc] of raw) {
+        const nb = applyMoveBrd(brd,r,c,tr,tc);
+        if (!isInCheck(side,nb)) moves.push({fr:r,fc:c,tr,tc});
+      }
+    }
+  }
+  return moves;
+}
+
+
+function applyMoveBrd(brd,fr,fc,tr,tc) {
+  const nb = brd.map(row=>row.map(cell=>cell?{...cell}:null));
+  nb[tr][tc]=nb[fr][fc]; nb[fr][fc]=null;
+  return nb;
+}
+
+
+// 이동 정렬: 포획 이동을 앞으로 (Move Ordering → 가지치기 효율 향상)
+function sortMoves(moves, brd) {
+  return moves.sort((a,b) => {
+    const va = brd[a.tr][a.tc] ? (EVAL_WEIGHTS[brd[a.tr][a.tc].type]||0) : 0;
+    const vb = brd[b.tr][b.tc] ? (EVAL_WEIGHTS[brd[b.tr][b.tc].type]||0) : 0;
+    return vb - va;
+  });
+}
+
+
+function minimax(depth, alpha, beta, isMaximizing, brd) {
+  if (depth === 0) return evaluateBoard(brd);
+
+
+  const side = isMaximizing ? 'R' : 'G';
+  const moves = sortMoves(getAllMovesBrd(side,brd), brd);
+
+
+  if (moves.length === 0) {
+    // 이동 불가 = 외통수
+    return isMaximizing ? -99999 : 99999;
+  }
+
+
+  if (isMaximizing) {
+    let best = -Infinity;
+    for (const {fr,fc,tr,tc} of moves) {
+      const nb = applyMoveBrd(brd,fr,fc,tr,tc);
+      const val = minimax(depth-1, alpha, beta, false, nb);
+      best = Math.max(best, val);
+      alpha = Math.max(alpha, val);
+      if (beta <= alpha) break; // 가지치기
+    }
+    return best;
+  } else {
+    let best = Infinity;
+    for (const {fr,fc,tr,tc} of moves) {
+      const nb = applyMoveBrd(brd,fr,fc,tr,tc);
+      const val = minimax(depth-1, alpha, beta, true, nb);
+      best = Math.min(best, val);
+      beta = Math.min(beta, val);
+      if (beta <= alpha) break;
+    }
+    return best;
+  }
+}
+
+
+function getBestMove() {
+  const isMax = aiSide === 'R'; // R(한)이 AI면 최대화
+  const allMoves = sortMoves(getAllMovesBrd(aiSide, board), board);
+  if (allMoves.length === 0) return null;
+
+
+  let bestMove = null;
+  let bestVal  = isMax ? -Infinity : Infinity;
+
+
+  for (const move of allMoves) {
+    const nb  = applyMoveBrd(board, move.fr, move.fc, move.tr, move.tc);
+    const val = minimax(aiDepth-1, -Infinity, Infinity, !isMax, nb);
+    if (isMax ? val > bestVal : val < bestVal) {
+      bestVal = val;
+      bestMove = move;
+    }
+  }
+  return bestMove;
+}
+
+
+// Worker 없이 setTimeout으로 UI 블로킹 방지 (간단 버전)
+function doAIMove() {
+  if (!gameStarted || currentTurn !== aiSide || aiThinking) return;
+  aiThinking = true;
+  showThinkOverlay(true);
+
+
+  setTimeout(() => {
+    const move = getBestMove();
+    showThinkOverlay(false);
+    aiThinking = false;
+
+
+    if (!move) { passTurn(); return; }
+
+
+    const { fr, fc, tr, tc } = move;
+    const captured = board[tr][tc];
+    if (captured) {
+      if (aiSide==='G') capturedG.push(captured);
+      else              capturedR.push(captured);
+    }
+    board[tr][tc] = board[fr][fc];
+    board[fr][fc] = null;
+    passCount = 0;
+
+
+    updateCapturedUI();
+    updateScoreUI();
+    currentTurn = currentTurn==='G' ? 'R' : 'G';
+    updateTurnUI();
+    draw();
+    setTimeout(checkGameState, 50);
+  }, 30); // 30ms 후 실행 (UI 업데이트 먼저 렌더링)
+}
+
+
+function showThinkOverlay(show) {
+  document.getElementById('think-overlay').style.display = show ? 'flex' : 'none';
+}
+
+
+// ── 게임 흐름 ──────────────────────────────────
+function startGame() {
+  gameStarted  = true;
+  currentTurn  = 'G';
+  passCount    = 0;
+  capturedG    = [];
+  capturedR    = [];
+  selected     = null;
+  possibleMoves= [];
+  aiThinking   = false;
+
+
+  initBoard();
+  updateCapturedUI();
+  updateScoreUI();
+  updateTurnUI();
+  updatePlayerLabels();
+
+
+  document.getElementById('pass-btn').disabled  = false;
+  document.getElementById('start-btn').disabled = true;
+  disableSetupBtns(true);
+  disablePreBtns(true);
+  draw();
+
+
+  // AI가 초(선공)이면 바로 이동
+  if (currentTurn === aiSide) {
+    setTimeout(doAIMove, 500);
+  }
+}
+
 
 function resetGame() {
-    maze = generateMaze(COLS, ROWS); player = { x: 1.5, y: 1.5 };
-    chaser = { x: exit.x + 0.5, y: exit.y + 0.5 };
-    gameState = GameState.READY; gameStartTime = 0;
-    document.getElementById("math-panel").classList.add("hidden");
-    document.getElementById("instruction").innerText = "화면을 클릭하여 심연으로 진입하세요";
-    document.getElementById("instruction").style.display = "block";
-    quizStats = { totalAttempted: 0, correctAnswers: 0, wrongQuestions: [] };
-    build3DWorld();
+  gameStarted   = false;
+  currentTurn   = 'G';
+  passCount     = 0;
+  capturedG     = [];
+  capturedR     = [];
+  selected      = null;
+  possibleMoves = [];
+  layoutG       = 'default';
+  layoutR       = 'default';
+  aiThinking    = false;
+
+
+  document.getElementById('modal').style.display  = 'none';
+  document.getElementById('pass-btn').disabled    = true;
+  document.getElementById('start-btn').disabled   = false;
+  showThinkOverlay(false);
+  disableSetupBtns(false);
+  disablePreBtns(false);
+  updateSetupBtnUI();
+  updateCapturedUI();
+  updateScoreUI();
+  updatePlayerLabels();
+
+
+  const dot = document.getElementById('turn-dot');
+  dot.className = 'turn-dot green-dot';
+  document.getElementById('turn-text').textContent = '초(楚) 선공 · 차림을 선택하세요';
+
+
+  initBoard();
+  draw();
 }
 
-const img = new Image(); img.src = 'image_0.png';
-img.onload = () => { 
-    chaserTexture = new THREE.CanvasTexture(img); resetGame(); 
-    function loop() { update(); renderer.render(scene, camera); drawMinimap(); requestAnimationFrame(loop); }
-    loop();
-};
+
+function passTurn() {
+  if (!gameStarted || aiThinking) return;
+  passCount++;
+  if (passCount >= 2) { showModal('무승부','두 플레이어 모두 한수쉬어 무승부입니다.'); return; }
+  currentTurn   = currentTurn==='G' ? 'R' : 'G';
+  selected      = null;
+  possibleMoves = [];
+  updateTurnUI();
+  draw();
+  if (currentTurn === aiSide) setTimeout(doAIMove, 300);
+}
+
+
+function checkGameState() {
+  if (isCheckmate(currentTurn)) {
+    const winner = currentTurn==='G' ? '한(漢)' : '초(楚)';
+    const loser  = currentTurn==='G' ? '초(楚)' : '한(漢)';
+    const isPlayerWin = winner === (playerSide==='G' ? '초(楚)' : '한(漢)');
+    showModal('외통수!', `${loser}의 왕이 포위됐습니다.\n${winner} 승리! ${isPlayerWin?'🎉 플레이어 승!':'🤖 AI 승!'}`);
+    gameStarted = false;
+    return;
+  }
+  if (isBikjang()) {
+    const scores = { G: calcScore('G'), R: calcScore('R')+1.5 };
+    const leader = scores.G>scores.R ? '초(楚)' : scores.R>scores.G ? '한(漢)' : '없음';
+    showModal('빅장 (무승부)', `두 왕이 마주보고 있습니다.\n점수: 초 ${scores.G} | 한 ${scores.R.toFixed(1)}\n${leader!=='없음'?leader+' 점수 우세':'동점'}`);
+    gameStarted = false;
+    return;
+  }
+}
+
+
+// ── 사이드/난이도 선택 ─────────────────────────
+function setPlayerSide(side) {
+  if (gameStarted) return;
+  playerSide = side;
+  aiSide     = side==='G' ? 'R' : 'G';
+  document.getElementById('play-as-G').classList.toggle('active', side==='G');
+  document.getElementById('play-as-R').classList.toggle('active', side==='R');
+  updatePlayerLabels();
+}
+
+
+function setDifficulty(depth) {
+  if (gameStarted) return;
+  aiDepth = depth;
+  [1,3,5].forEach(d => {
+    document.getElementById(`diff-${d}`).classList.toggle('active', d===depth);
+  });
+}
+
+
+function updatePlayerLabels() {
+  const labelG = document.getElementById('label-G');
+  const labelR = document.getElementById('label-R');
+  if (playerSide === 'G') {
+    labelG.innerHTML = '초 (楚) <span class="ai-badge">나</span>';
+    labelR.innerHTML = '한 (漢) <span class="ai-badge">AI</span>';
+  } else {
+    labelG.innerHTML = '초 (楚) <span class="ai-badge">AI</span>';
+    labelR.innerHTML = '한 (漢) <span class="ai-badge">나</span>';
+  }
+}
+
+
+function disablePreBtns(disabled) {
+  document.querySelectorAll('.pre-btn').forEach(b => b.disabled = disabled);
+}
+
+
+// ── 차림 ──────────────────────────────────────
+function setLayout(side, layout) {
+  if (gameStarted) return;
+  if (side==='G') layoutG=layout; else layoutR=layout;
+  updateSetupBtnUI();
+  initBoard();
+  draw();
+}
+
+
+function updateSetupBtnUI() {
+  ['default','inner','outer'].forEach(l => {
+    const id = l==='default'?'default':l==='inner'?'inner':'outer';
+    document.getElementById(`g-${id}`).classList.toggle('active', layoutG===l);
+    document.getElementById(`r-${id}`).classList.toggle('active', layoutR===l);
+  });
+}
+
+
+function disableSetupBtns(disabled) {
+  document.querySelectorAll('.setup-btn').forEach(b => b.disabled=disabled);
+}
+
+
+// ── UI 업데이트 ─────────────────────────────────
+function updateTurnUI() {
+  const dot  = document.getElementById('turn-dot');
+  const text = document.getElementById('turn-text');
+  const inCheck = isInCheck(currentTurn, board);
+  const inBik   = isBikjang();
+  const isAI    = currentTurn === aiSide;
+
+
+  if (currentTurn==='G') {
+    dot.className = 'turn-dot green-dot pulse';
+    text.textContent = `초(楚) 차례${isAI?' [AI]':''}${inCheck?' ⚠ 장군!':''}${inBik?' ◈ 빅장':''}`;
+  } else {
+    dot.className = 'turn-dot red-dot pulse';
+    text.textContent = `한(漢) 차례${isAI?' [AI]':''}${inCheck?' ⚠ 장군!':''}${inBik?' ◈ 빅장':''}`;
+  }
+}
+
+
+function updateCapturedUI() {
+  document.getElementById('captured-pieces-G').innerHTML =
+    capturedG.map(p=>`<span class="cap-piece red">${p.name}</span>`).join('');
+  document.getElementById('captured-pieces-R').innerHTML =
+    capturedR.map(p=>`<span class="cap-piece green">${p.name}</span>`).join('');
+}
+
+
+function updateScoreUI() {
+  document.getElementById('score-G').textContent = `점수: ${calcScore('G')}`;
+  document.getElementById('score-R').textContent = `점수: ${calcScore('R')} (+1.5)`;
+}
+
+
+function showModal(title, msg) {
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-msg').textContent   = msg;
+  document.getElementById('modal').style.display     = 'flex';
+}
+
+
+// ── 클릭 이벤트 ─────────────────────────────────
+canvas.addEventListener('mousedown', (e) => {
+  if (!gameStarted || currentTurn === aiSide || aiThinking) return;
+
+
+  const rect  = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const mx = (e.clientX - rect.left) * scaleX;
+  const my = (e.clientY - rect.top)  * scaleY;
+
+
+  const c = Math.round((mx - MARGIN) / SPACING);
+  const r = Math.round((my - MARGIN) / SPACING);
+  if (!inBounds(r,c)) return;
+
+
+  if (selected) {
+    const isPossible = possibleMoves.some(([pr,pc])=>pr===r&&pc===c);
+    if (isPossible) {
+      const moving   = board[selected.r][selected.c];
+      const captured = board[r][c];
+      if (captured) {
+        if (moving.side==='G') capturedG.push(captured);
+        else                   capturedR.push(captured);
+      }
+      board[r][c]                   = moving;
+      board[selected.r][selected.c] = null;
+      selected      = null;
+      possibleMoves = [];
+      passCount     = 0;
+
+
+      updateCapturedUI();
+      updateScoreUI();
+      currentTurn = currentTurn==='G' ? 'R' : 'G';
+      updateTurnUI();
+      draw();
+
+
+      setTimeout(() => {
+        checkGameState();
+        if (gameStarted && currentTurn===aiSide) setTimeout(doAIMove, 200);
+      }, 50);
+    } else {
+      if (board[r][c] && board[r][c].side===currentTurn) {
+        selected      = {r,c};
+        possibleMoves = getLegalMoves(board[r][c],r,c);
+      } else {
+        selected=null; possibleMoves=[];
+      }
+      draw();
+    }
+  } else {
+    if (board[r][c] && board[r][c].side===currentTurn) {
+      selected      = {r,c};
+      possibleMoves = getLegalMoves(board[r][c],r,c);
+    }
+    draw();
+  }
+});
+
+
+// ── 그리기 ─────────────────────────────────────
+const BOARD_BG_COLOR  = '#d4a96a';
+const LINE_COLOR      = '#7a4e2a';
+const PALACE_LINE_CLR = '#5a3010';
+
+
+function draw() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle = BOARD_BG_COLOR;
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+
+  ctx.save(); ctx.globalAlpha=0.05;
+  for (let i=0;i<canvas.height;i+=3) {
+    ctx.fillStyle=i%6===0?'#3d1a00':'#f0c070';
+    ctx.fillRect(0,i,canvas.width,1);
+  }
+  ctx.restore();
+
+
+  drawGrid();
+  drawPalaceDiagonals();
+  drawRiver();
+  drawMoveHighlights();
+  drawPieces();
+}
+
+
+function drawGrid() {
+  ctx.strokeStyle=LINE_COLOR; ctx.lineWidth=1.5;
+  for (let i=0;i<ROWS;i++) {
+    ctx.beginPath(); ctx.moveTo(MARGIN,MARGIN+i*SPACING);
+    ctx.lineTo(MARGIN+(COLS-1)*SPACING,MARGIN+i*SPACING); ctx.stroke();
+  }
+  for (let j=0;j<COLS;j++) {
+    ctx.beginPath(); ctx.moveTo(MARGIN+j*SPACING,MARGIN);
+    ctx.lineTo(MARGIN+j*SPACING,MARGIN+(ROWS-1)*SPACING); ctx.stroke();
+  }
+  ctx.strokeStyle='#5a3010'; ctx.lineWidth=3;
+  ctx.strokeRect(MARGIN,MARGIN,(COLS-1)*SPACING,(ROWS-1)*SPACING);
+}
+
+
+function drawPalaceDiagonals() {
+  ctx.strokeStyle=PALACE_LINE_CLR; ctx.lineWidth=1.5; ctx.setLineDash([4,3]);
+  ctx.beginPath();
+  ctx.moveTo(MARGIN+3*SPACING,MARGIN+0*SPACING); ctx.lineTo(MARGIN+5*SPACING,MARGIN+2*SPACING);
+  ctx.moveTo(MARGIN+5*SPACING,MARGIN+0*SPACING); ctx.lineTo(MARGIN+3*SPACING,MARGIN+2*SPACING);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(MARGIN+3*SPACING,MARGIN+7*SPACING); ctx.lineTo(MARGIN+5*SPACING,MARGIN+9*SPACING);
+  ctx.moveTo(MARGIN+5*SPACING,MARGIN+7*SPACING); ctx.lineTo(MARGIN+3*SPACING,MARGIN+9*SPACING);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle='rgba(200,147,74,0.3)';
+  ctx.fillRect(MARGIN+3*SPACING-1,MARGIN,2*SPACING+2,2*SPACING);
+  ctx.fillRect(MARGIN+3*SPACING-1,MARGIN+7*SPACING,2*SPACING+2,2*SPACING);
+}
+
+
+function drawRiver() {
+  const ry=MARGIN+4.5*SPACING;
+  ctx.save();
+  ctx.fillStyle='rgba(100,160,220,0.12)';
+  ctx.fillRect(MARGIN,MARGIN+4*SPACING,(COLS-1)*SPACING,SPACING);
+  ctx.font='italic bold 13px "Noto Serif KR",serif';
+  ctx.fillStyle='rgba(80,120,180,0.45)'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('楚 河',MARGIN+2*SPACING,ry);
+  ctx.fillText('漢 界',MARGIN+6*SPACING,ry);
+  ctx.restore();
+}
+
+
+function drawMoveHighlights() {
+  for (const [r,c] of possibleMoves) {
+    const x=MARGIN+c*SPACING, y=MARGIN+r*SPACING;
+    const target=board[r][c];
+    if (target&&target.side!==currentTurn) {
+      ctx.beginPath(); ctx.arc(x,y,26,0,Math.PI*2);
+      ctx.fillStyle='rgba(220,50,50,0.25)'; ctx.strokeStyle='rgba(220,50,50,0.85)';
+      ctx.lineWidth=2.5; ctx.fill(); ctx.stroke();
+    } else {
+      ctx.beginPath(); ctx.arc(x,y,9,0,Math.PI*2);
+      ctx.fillStyle='rgba(60,200,100,0.70)'; ctx.strokeStyle='rgba(20,120,60,0.80)';
+      ctx.lineWidth=2; ctx.fill(); ctx.stroke();
+    }
+  }
+}
+
+
+const PIECE_RADII={king:27,advisor:22,chariot:25,cannon:23,horse:24,elephant:24,pawn:19};
+
+
+function drawPieces() {
+  for (let r=0;r<ROWS;r++) for (let c=0;c<COLS;c++) {
+    const piece=board[r][c]; if (!piece) continue;
+    const x=MARGIN+c*SPACING, y=MARGIN+r*SPACING;
+    const rd=PIECE_RADII[piece.type]||22;
+    const isGreen=piece.side==='G';
+    const isSel=selected&&selected.r===r&&selected.c===c;
+    const inCheck=gameStarted&&piece.type==='king'&&isInCheck(piece.side,board);
+    const isAIPiece=piece.side===aiSide;
+
+
+    ctx.save(); ctx.shadowColor='rgba(0,0,0,0.4)'; ctx.shadowBlur=6; ctx.shadowOffsetY=3;
+    ctx.beginPath(); ctx.arc(x,y,rd,0,Math.PI*2);
+    const grad=ctx.createRadialGradient(x-rd*0.3,y-rd*0.3,rd*0.1,x,y,rd);
+    grad.addColorStop(0,'#fff8e8'); grad.addColorStop(1,'#e8d4a8');
+    ctx.fillStyle=grad; ctx.fill(); ctx.restore();
+
+
+    ctx.beginPath(); ctx.arc(x,y,rd,0,Math.PI*2);
+    if (isSel)       { ctx.strokeStyle='#f0d000'; ctx.lineWidth=4; }
+    else if (inCheck){ ctx.strokeStyle='#ff2020'; ctx.lineWidth=4; }
+    else             { ctx.strokeStyle=isGreen?'#14532d':'#7f1d1d'; ctx.lineWidth=2.5; }
+    ctx.stroke();
+
+
+    ctx.beginPath(); ctx.arc(x,y,rd-4,0,Math.PI*2);
+    ctx.strokeStyle=isGreen?'rgba(20,83,45,0.3)':'rgba(127,29,29,0.3)';
+    ctx.lineWidth=1; ctx.stroke();
+
+
+    if (isSel) {
+      ctx.save(); ctx.beginPath(); ctx.arc(x,y,rd+4,0,Math.PI*2);
+      ctx.strokeStyle='rgba(240,208,0,0.5)'; ctx.lineWidth=6; ctx.stroke(); ctx.restore();
+    }
+    if (inCheck) {
+      ctx.save(); ctx.beginPath(); ctx.arc(x,y,rd+5,0,Math.PI*2);
+      ctx.strokeStyle='rgba(255,30,30,0.45)'; ctx.lineWidth=8; ctx.stroke(); ctx.restore();
+    }
+
+
+    ctx.fillStyle=isGreen?'#14532d':'#7f1d1d';
+    ctx.font=`bold ${Math.floor(rd*0.85)}px "Noto Serif KR",serif`;
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(piece.name,x,y+1);
+  }
+}
+
+
+// ── 초기화 ─────────────────────────────────────
+initBoard();
+updateSetupBtnUI();
+updatePlayerLabels();
+draw();
+
