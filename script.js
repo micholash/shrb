@@ -127,7 +127,7 @@ function initBoard() {
   const [r1,r2,r6,r7] = getHorsElephPos(layoutR);
   const HN = { horse:'馬', elephant:'象' };
 
-  board[0][4]=mk('G','king','楚'); board[0][3]=mk('G','advisor','士'); board[0][5]=mk('G','advisor','士');
+  board[0][4]=mk('G','king','楚'); board[1][3]=mk('G','advisor','士'); board[0][5]=mk('G','advisor','士');
   board[0][0]=mk('G','chariot','車'); board[0][8]=mk('G','chariot','車');
   board[0][1]=mk('G',g1,HN[g1]); board[0][2]=mk('G',g2,HN[g2]);
   board[0][6]=mk('G',g6,HN[g6]); board[0][7]=mk('G',g7,HN[g7]);
@@ -135,7 +135,7 @@ function initBoard() {
   board[3][0]=mk('G','pawn','卒'); board[3][2]=mk('G','pawn','卒'); board[3][4]=mk('G','pawn','卒');
   board[3][6]=mk('G','pawn','卒'); board[3][8]=mk('G','pawn','卒');
 
-  board[9][4]=mk('R','king','漢'); board[9][3]=mk('R','advisor','士'); board[9][5]=mk('R','advisor','士');
+  board[9][4]=mk('R','king','漢'); board[8][3]=mk('R','advisor','士'); board[9][5]=mk('R','advisor','士');
   board[9][0]=mk('R','chariot','車'); board[9][8]=mk('R','chariot','車');
   board[9][1]=mk('R',r1,HN[r1]); board[9][2]=mk('R',r2,HN[r2]);
   board[9][6]=mk('R',r6,HN[r6]); board[9][7]=mk('R',r7,HN[r7]);
